@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>ClipNinja</AssemblyName>
+    <RootNamespace>ClipNinjaV2</RootNamespace>
+    <Version>1.2.0</Version>
+    <Authors>ClipNinja</Authors>
+    <Product>ClipNinja</Product>
+  </PropertyGroup>
+
+  <!-- Set the .exe app icon ONLY if the .ico file is present -->
+  <PropertyGroup Condition="Exists('Resources\ninja.ico')">
+    <ApplicationIcon>Resources\ninja.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Single-file self-contained publish settings.
+       These apply unconditionally so `dotnet publish -c Release` always
+       produces a ~80MB standalone .exe that runs without requiring .NET
+       to be pre-installed on the target machine. -->
+  <PropertyGroup>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Trim cosmetic optimization: keep .pdb out of the published output -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.1.4" />
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.122" />
+  </ItemGroup>
+
+  <!-- Embed the icon as a WPF resource ONLY if it exists -->
+  <ItemGroup Condition="Exists('Resources\ninja.ico')">
+    <Resource Include="Resources\ninja.ico" />
+  </ItemGroup>
+
+</Project>
