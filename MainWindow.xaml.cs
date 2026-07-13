@@ -1474,29 +1474,48 @@ public partial class MainWindow : Window
     {
         try
         {
+            // The main window is Topmost — an OWNERLESS MessageBox opens
+            // UNDERNEATH it and appears to "flash and vanish" (it's not
+            // closing, it's being buried). Fix: make the window visible
+            // and OWN every dialog in this flow; owned dialogs render
+            // above their topmost owner.
+            bool wasHidden = !IsVisible;
+            if (wasHidden) Show();
+            Activate();
+
             var (update, error) = await Services.UpdateService.CheckAsync(_vm.Settings.UpdateRepo);
             if (update is null)
             {
-                MessageBox.Show(error ?? $"✓ You're up to date (v{Services.UpdateService.CurrentVersion.ToString(3)}).",
+                MessageBox.Show(this,
+                    error ?? $"✓ You're up to date (v{Services.UpdateService.CurrentVersion.ToString(3)}).",
                     "ClipNinja updates", MessageBoxButton.OK,
                     error is null ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                if (wasHidden) Hide();
                 return;
             }
             var notes = string.IsNullOrWhiteSpace(update.Notes)
                 ? ""
                 : "\n\nRelease notes:\n" + (update.Notes.Length > 600 ? update.Notes[..600] + "…" : update.Notes);
-            var answer = MessageBox.Show(
+            var answer = MessageBox.Show(this,
                 $"ClipNinja {update.TagName} is available (you have v{Services.UpdateService.CurrentVersion.ToString(3)}).{notes}\n\nUpdate now? The app will restart.",
                 "ClipNinja update", MessageBoxButton.YesNo, MessageBoxImage.Information);
-            if (answer != MessageBoxResult.Yes) return;
+            if (answer != MessageBoxResult.Yes)
+            {
+                if (wasHidden) Hide();
+                return;
+            }
             _vm.StatusText = "Downloading update…";
             var applyError = await Services.UpdateService.DownloadAndStageAsync(update);
             if (applyError is not null)
             {
                 _vm.StatusText = applyError;
+                MessageBox.Show(this, applyError, "ClipNinja update",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            Application.Current.Shutdown();
+            // Guaranteed exit: graceful shutdown, hard-exit fallback if
+            // anything holds the process (and its file lock) open.
+            Services.UpdateService.ShutdownForUpdate();
         }
         catch (Exception ex)
         {
@@ -1513,6 +1532,17 @@ public partial class MainWindow : Window
     {
         try
         {
+            // If the last self-update's swap script left a log, surface
+            // it — a FAILED swap otherwise looks like "clicked yes,
+            // nothing happened". Success logs just go to trace.
+            var swapLog = Services.UpdateService.ConsumeSwapLog();
+            if (swapLog is not null)
+            {
+                Services.Trace.Log("update", $"previous swap result: {swapLog.Trim()}");
+                if (swapLog.Contains("FAILED", StringComparison.OrdinalIgnoreCase))
+                    _vm.StatusText = "⚠ Last update failed to apply — see trace log (tray → Open trace log)";
+            }
+
             if (!_vm.Settings.AutoCheckForUpdates) return;
             if (string.IsNullOrWhiteSpace(_vm.Settings.UpdateRepo)) return;
             await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));

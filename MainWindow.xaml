@@ -492,7 +492,7 @@
                     <Grid>
                         <TextBlock Style="{StaticResource HeaderTextStyle}">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text=" v2.8.0"
+                            <Run Text=" v2.8.1"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />

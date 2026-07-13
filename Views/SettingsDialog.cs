@@ -399,8 +399,10 @@ public static class SettingsDialog
                 checkResult.Text = applyError;
                 return;
             }
-            // Swap script is waiting for our file lock to release.
-            Application.Current.Shutdown();
+            // Swap script is waiting for our file lock to release —
+            // graceful shutdown with a hard-exit fallback so the lock
+            // is guaranteed to drop even from inside this modal dialog.
+            Services.UpdateService.ShutdownForUpdate();
         };
         checkRow.Children.Add(checkBtn);
         checkRow.Children.Add(checkResult);

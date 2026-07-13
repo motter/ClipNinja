@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.8.1] — 2026-07-13
+
+### Fixed — update dialogs buried under the Topmost main window
+The main window is always-on-top, and the tray update flow's message
+boxes were ownerless — so they opened UNDERNEATH ClipNinja and
+appeared to "flash and vanish". The tray flow now shows the window,
+owns every dialog (owned dialogs render above their topmost owner),
+and reports download errors in a dialog instead of only the status
+bar.
+
+### Fixed / hardened — self-update swap reliability
+- The swap script's delay now uses ping instead of `timeout`
+  (`timeout` requires an interactive console and can die instantly
+  when launched from a hidden no-console process, exhausting the
+  retry loop in milliseconds — the likely reason "Yes" appeared to
+  do nothing).
+- The script writes a swap log next to the exe; on next launch the
+  app surfaces a failed swap in the status bar instead of silently
+  staying on the old version.
+- Exiting for the swap is now guaranteed: graceful shutdown with a
+  3-second hard-exit fallback, so the file lock always releases.
+
 ## [2.8.0] — 2026-07-13
 
 ### Added — post-capture chooser

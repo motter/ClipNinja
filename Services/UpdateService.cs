@@ -174,18 +174,28 @@ public static class UpdateService
             // exit), relaunch, self-delete. Capped at ~2 minutes of
             // retries so a wedged process can't leave an immortal loop.
             var script = Path.Combine(stageDir, "apply-update.cmd");
+            var swapLog = currentExe + ".update.log";
             await File.WriteAllTextAsync(script, $"""
                 @echo off
+                echo [%date% %time%] swap started > "{swapLog}"
                 set tries=0
                 :retry
                 set /a tries+=1
-                if %tries% gtr 120 exit /b 1
-                timeout /t 1 /nobreak >nul
+                if %tries% gtr 120 goto failed
+                rem ping is the delay here (NOT timeout): timeout needs an
+                rem interactive console stdin and dies instantly when run
+                rem from a hidden no-console process, which spins the loop
+                rem to exhaustion in milliseconds.
+                ping -n 2 127.0.0.1 >nul 2>&1
                 copy /y "{currentExe}" "{currentExe}.bak" >nul 2>&1
                 copy /y "{newExe}" "{currentExe}" >nul 2>&1
                 if errorlevel 1 goto retry
+                echo [%date% %time%] swap OK after %tries% tries >> "{swapLog}"
                 start "" "{currentExe}"
                 exit /b 0
+                :failed
+                echo [%date% %time%] SWAP FAILED after %tries% tries - exe still locked or copy blocked >> "{swapLog}"
+                exit /b 1
                 """);
 
             Trace.Log("update", $"staged {info.TagName}; launching swap script");
@@ -204,5 +214,42 @@ public static class UpdateService
             Trace.Log("update", $"stage failed: {ex}");
             return $"Update failed: {ex.Message}";
         }
+    }
+
+    /// <summary>Read-and-consume the swap log the update script leaves
+    /// next to the exe. Returns the log text once (deletes it), or null.
+    /// Called at startup so a failed swap is REPORTED instead of the
+    /// user silently staying on the old version.</summary>
+    public static string? ConsumeSwapLog()
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return null;
+            var log = exe + ".update.log";
+            if (!File.Exists(log)) return null;
+            var text = File.ReadAllText(log);
+            File.Delete(log);
+            return text;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Shut the app down for the swap, with a belt-and-braces
+    /// fallback: if anything (a nested modal loop, a stuck handler)
+    /// keeps the process alive past a grace period, hard-exit so the
+    /// file lock is GUARANTEED to release and the staged swap proceeds.
+    /// Normal shutdown wins the race in the ordinary case, so cleanup
+    /// still runs.</summary>
+    public static void ShutdownForUpdate()
+    {
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
+            Trace.Log("update", "graceful shutdown didn't finish in 3s - hard exit for swap");
+            Environment.Exit(0);
+        });
+        System.Windows.Application.Current.Dispatcher.Invoke(
+            () => System.Windows.Application.Current.Shutdown());
     }
 }
