@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.9.1] — 2026-07-14
+
+### Added — 🔍 search button in the header
+Search (and with it the whole type-filter icon row) was reachable
+only by Ctrl+F, which made the feature effectively invisible. There's
+now a 🔍 button in the title bar, left of 📷. Click it to open the
+search bar with its All · 🖼 · 🔗 · 📄 · 🌐 · 📊 filter icons; click
+it again to close and clear.
+
 ## [2.9.0] — 2026-07-14
 
 ### Fixed — Esc now reliably cancels a capture

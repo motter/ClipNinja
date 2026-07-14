@@ -1825,6 +1825,17 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Header 🔍 button — toggles the search bar (which also
+    /// houses the icon type-filter row). Toggle rather than open-only:
+    /// clicking the button you just clicked should undo it.</summary>
+    private void OnSearchButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SlotSearchBar.Visibility == Visibility.Visible)
+            CloseSlotSearch();
+        else
+            ShowSlotSearch();
+    }
+
     private void ShowSlotSearch()
     {
         SlotSearchBar.Visibility = Visibility.Visible;

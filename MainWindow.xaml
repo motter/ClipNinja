@@ -492,7 +492,7 @@
                     <Grid>
                         <TextBlock Style="{StaticResource HeaderTextStyle}">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text=" v2.9.0"
+                            <Run Text=" v2.9.1"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
@@ -501,6 +501,15 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     Margin="0,0,8,0">
+                            <!-- Search + type filter. The search bar (with the
+                                 icon type-filter row) was Ctrl+F only, which
+                                 made the whole filtering feature invisible —
+                                 this button is its front door. -->
+                            <Button x:Name="SearchButton"
+                                    Style="{StaticResource WinChromeButtonStyle}"
+                                    Content="🔍"
+                                    Click="OnSearchButton_Click"
+                                    ToolTip="Search &amp; filter by type (Ctrl+F)" />
                             <!-- Screen capture — drag-select a region, Greenshot-
                                  style. Ctrl+PrintScreen for instant full screen. -->
                             <Button x:Name="CaptureButton"
