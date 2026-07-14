@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -35,8 +36,14 @@ namespace ClipNinjaV2.Views;
 /// </summary>
 public static class RegionSelectorWindow
 {
+    /// <summary>Center of the last capture in virtual-screen physical
+    /// pixels — lets the caller put the post-capture chooser on the
+    /// monitor the shot came from. Null if nothing was captured.</summary>
+    public static Point? LastCaptureCenter { get; private set; }
+
     public static BitmapSource? SelectAndCapture()
     {
+        LastCaptureCenter = null;
         // Freeze the screen first.
         var frozen = Services.ScreenCaptureService.CaptureFullScreen();
         if (frozen is null) return null;
@@ -183,14 +190,41 @@ public static class RegionSelectorWindow
                 var flat = new WriteableBitmap(crop);
                 flat.Freeze();
                 result = flat;
+                LastCaptureCenter = new Point(vx + px + pw / 2.0, vy + py + ph / 2.0);
             }
             catch { result = null; }
             win.Close();
         };
-        win.KeyDown += (_, e) =>
+        // Loaded → force activation + keyboard focus. A borderless
+        // Topmost window shown right after other windows were hidden
+        // doesn't always receive focus from Windows, which silently
+        // breaks Esc/Enter/number keys (they go to whatever app had
+        // focus before).
+        win.Loaded += (_, _) =>
         {
-            if (e.Key == Key.Escape) { result = null; win.Close(); }
-            else if (e.Key == Key.Enter) { result = frozen; win.Close(); }
+            win.Activate();
+            win.Focus();
+            Keyboard.Focus(win);
+        };
+        // PreviewKeyDown (tunneling) rather than KeyDown (bubbling):
+        // fires at the window FIRST, so no child element can swallow
+        // the key before we see it.
+        win.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) { result = null; e.Handled = true; win.Close(); }
+            else if (e.Key == Key.Enter)
+            {
+                result = frozen;
+                // Whole-virtual-screen grab: anchor follow-up UI on the
+                // primary monitor rather than the geometric center of a
+                // multi-monitor rig (which can land in a bezel gap).
+                var prim = Services.ScreenCaptureService.GetMonitors().FirstOrDefault(m => m.isPrimary);
+                LastCaptureCenter = prim.width > 0
+                    ? new Point(prim.x + prim.width / 2.0, prim.y + prim.height / 2.0)
+                    : null;
+                e.Handled = true;
+                win.Close();
+            }
             else
             {
                 // Number keys 1-9 (top row or numpad) capture that
@@ -220,6 +254,7 @@ public static class RegionSelectorWindow
                     var flat = new WriteableBitmap(crop);
                     flat.Freeze();
                     result = flat;
+                    LastCaptureCenter = new Point(m.x + m.width / 2.0, m.y + m.height / 2.0);
                 }
                 catch { result = null; }
                 win.Close();

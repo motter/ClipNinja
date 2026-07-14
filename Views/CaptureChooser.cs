@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -26,9 +27,15 @@ namespace ClipNinjaV2.Views;
 /// </summary>
 public static class CaptureChooser
 {
+    /// <param name="anchor">Point in VIRTUAL-SCREEN physical pixels that
+    /// the popup should appear near — the center of the captured region
+    /// or monitor. The popup opens centered on whichever monitor
+    /// contains that point, so it shows up where you were working
+    /// rather than wherever ClipNinja's main window happens to live.
+    /// Null → primary monitor.</param>
     public static void Show(Window owner, BitmapSource shot, AppSettings settings,
         Action<BitmapSource> sendToClipNinja, Action<string> status, Action redoCapture,
-        Action? persistSettings = null)
+        Action? persistSettings = null, Point? anchor = null)
     {
         var current = shot;  // may be replaced by an annotated version
 
@@ -36,7 +43,9 @@ public static class CaptureChooser
         {
             Title = "Screenshot captured",
             Owner = owner,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            // Manual placement: positioned on the capture's monitor once
+            // we know the popup's measured size (see Loaded below).
+            WindowStartupLocation = WindowStartupLocation.Manual,
             WindowStyle = WindowStyle.ToolWindow,
             ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false,
@@ -218,9 +227,49 @@ public static class CaptureChooser
         footRow.Children.Add(hints);
         root.Children.Add(footRow);
 
-        dlg.KeyDown += (_, e) =>
+        // Place the popup on the monitor the capture came from, centered.
+        // WPF window coords are DIUs while monitor rects are physical px;
+        // convert via the window's DPI scale.
+        dlg.Loaded += (_, _) =>
         {
-            if (e.Key == Key.Escape) dlg.Close();
+            try
+            {
+                var mons = Services.ScreenCaptureService.GetMonitors();
+                var target = mons.FirstOrDefault(m => m.isPrimary);
+                if (anchor is { } a)
+                {
+                    foreach (var m in mons)
+                    {
+                        if (a.X >= m.x && a.X < m.x + m.width &&
+                            a.Y >= m.y && a.Y < m.y + m.height)
+                        { target = m; break; }
+                    }
+                }
+                if (target.width > 0)
+                {
+                    var src = PresentationSource.FromVisual(dlg);
+                    double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+                    double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
+                    if (sx <= 0) sx = 1.0;
+                    if (sy <= 0) sy = 1.0;
+                    // Monitor rect in DIUs, then center the (already
+                    // measured, thanks to SizeToContent) popup in it.
+                    double mLeft = target.x / sx, mTop = target.y / sy;
+                    double mW = target.width / sx, mH = target.height / sy;
+                    dlg.Left = mLeft + (mW - dlg.ActualWidth) / 2;
+                    dlg.Top = mTop + (mH - dlg.ActualHeight) / 2;
+                }
+            }
+            catch { /* fall back to wherever WPF put it */ }
+            dlg.Activate();
+            dlg.Focus();
+        };
+
+        // PreviewKeyDown (tunneling): fires at the window before any
+        // focused button can swallow the key, so Esc always discards.
+        dlg.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) { e.Handled = true; dlg.Close(); }
         };
 
         dlg.Content = root;

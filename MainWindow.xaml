@@ -492,7 +492,7 @@
                     <Grid>
                         <TextBlock Style="{StaticResource HeaderTextStyle}">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text=" v2.8.1"
+                            <Run Text=" v2.9.0"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
@@ -998,23 +998,23 @@
                                     </Style>
                                 </TextBox.Style>
                             </TextBox>
-                            <!-- Type filter — combines with the text search.
-                                 Tag = filter key consumed by ApplySlotFilter. -->
-                            <ComboBox Grid.Column="1"
-                                      x:Name="TypeFilterCombo"
-                                      FontSize="11"
-                                      Margin="4,0,0,0"
-                                      MinWidth="96"
-                                      SelectedIndex="0"
-                                      SelectionChanged="OnTypeFilter_Changed"
-                                      ToolTip="Filter by content type">
-                                <ComboBoxItem Content="All types"    Tag="All" />
-                                <ComboBoxItem Content="🖼 Screenshots" Tag="Image" />
-                                <ComboBoxItem Content="🔗 URLs"        Tag="Url" />
-                                <ComboBoxItem Content="📄 Plain text"  Tag="Text" />
-                                <ComboBoxItem Content="🌐 HTML"        Tag="Html" />
-                                <ComboBoxItem Content="📊 Excel"       Tag="Excel" />
-                            </ComboBox>
+                            <!-- Type filter — icon toggles, one per content
+                                 type, matching the glyphs used elsewhere in
+                                 the app. Hover for the name. Click the lit
+                                 one again (or ✕ All) to clear. Combines with
+                                 the text search. Tag = filter key consumed by
+                                 ApplySlotFilter.
+                                 Toggles rather than a ComboBox: no
+                                 SelectedIndex, so nothing fires during XAML
+                                 parse (that was the v2.5.2 startup NRE). -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="4,0,0,0">
+                                <ToggleButton x:Name="TypeAll"   Tag="All"   Content="All" FontSize="10" Width="30" Height="22" Margin="0,0,2,0" Cursor="Hand" IsChecked="True" Click="OnTypeFilter_Click" ToolTip="All types" />
+                                <ToggleButton x:Name="TypeImage" Tag="Image" Content="🖼"  FontSize="11" Width="26" Height="22" Margin="0,0,2,0" Cursor="Hand" Click="OnTypeFilter_Click" ToolTip="Screenshots &amp; images" />
+                                <ToggleButton x:Name="TypeUrl"   Tag="Url"   Content="🔗"  FontSize="11" Width="26" Height="22" Margin="0,0,2,0" Cursor="Hand" Click="OnTypeFilter_Click" ToolTip="URLs" />
+                                <ToggleButton x:Name="TypeText"  Tag="Text"  Content="📄"  FontSize="11" Width="26" Height="22" Margin="0,0,2,0" Cursor="Hand" Click="OnTypeFilter_Click" ToolTip="Plain text" />
+                                <ToggleButton x:Name="TypeHtml"  Tag="Html"  Content="🌐"  FontSize="11" Width="26" Height="22" Margin="0,0,2,0" Cursor="Hand" Click="OnTypeFilter_Click" ToolTip="HTML / rich text" />
+                                <ToggleButton x:Name="TypeExcel" Tag="Excel" Content="📊"  FontSize="11" Width="26" Height="22" Margin="0,0,2,0" Cursor="Hand" Click="OnTypeFilter_Click" ToolTip="Excel / spreadsheet" />
+                            </StackPanel>
                             <Button Grid.Column="2"
                                     Content="✕"
                                     FontSize="10"

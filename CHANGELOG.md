@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.9.0] — 2026-07-14
+
+### Fixed — Esc now reliably cancels a capture
+Both the region selector and the post-capture popup listened for Esc
+with KeyDown (bubbling) — which never fired if focus landed on a
+child element, or if Windows didn't hand keyboard focus to the
+borderless selector at all (common right after other windows are
+hidden for the capture). Both now use PreviewKeyDown (tunneling,
+fires at the window first) and force keyboard focus on load. Esc
+discards; the selector's Enter / 1-4 keys are more reliable too.
+
+### Changed — post-capture popup appears where you captured
+The popup was centered on ClipNinja's main window, which could be on
+a different monitor entirely. It now opens centered on the monitor
+the capture came from: the monitor containing your dragged region,
+the monitor you grabbed, or the primary monitor for a whole-desktop
+capture. (DPI-aware, so it lands correctly on mixed-scaling rigs.)
+
+### Changed — type filter is now icons, not a dropdown
+The search bar's type filter is a row of icon toggles matching the
+glyphs used elsewhere in the app: **All · 🖼 · 🔗 · 📄 · 🌐 · 📊**.
+Hover any icon for its name (Screenshots, URLs, Plain text, HTML,
+Excel). Click one to filter; click the lit one again to clear. One
+click instead of two, and no dropdown to open.
+
 ## [2.8.1] — 2026-07-13
 
 ### Fixed — update dialogs buried under the Topmost main window

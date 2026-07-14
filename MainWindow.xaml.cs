@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;   // ToggleButton (type-filter icons)
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using ClipNinjaV2.Models;
@@ -1385,7 +1386,14 @@ public partial class MainWindow : Window
 
             if (wasVisible) { Show(); Activate(); }
             if (shot is null) { _vm.StatusText = "Monitor capture failed (display changed?)"; return; }
-            ShowCaptureChooser(shot, () => CaptureMonitorNow(index));
+            // Chooser appears on the monitor you captured.
+            var mons = Services.ScreenCaptureService.GetMonitors();
+            System.Windows.Point? anchor = index < mons.Count
+                ? new System.Windows.Point(
+                    mons[index].x + mons[index].width / 2.0,
+                    mons[index].y + mons[index].height / 2.0)
+                : null;
+            ShowCaptureChooser(shot, () => CaptureMonitorNow(index), anchor);
         }
         catch (Exception ex)
         {
@@ -1657,7 +1665,9 @@ public partial class MainWindow : Window
 
             if (wasVisible) { Show(); Activate(); }
             if (shot is null) return;  // canceled
-            ShowCaptureChooser(shot, StartRegionCapture);
+            // Selector reports where the shot came from → the chooser
+            // appears on that monitor.
+            ShowCaptureChooser(shot, StartRegionCapture, Views.RegionSelectorWindow.LastCaptureCenter);
         }
         catch (Exception ex)
         {
@@ -1681,7 +1691,13 @@ public partial class MainWindow : Window
 
             if (wasVisible) { Show(); Activate(); }
             if (shot is null) { _vm.StatusText = "Capture failed"; return; }
-            ShowCaptureChooser(shot, CaptureFullScreenNow);
+            // Whole virtual desktop → put the chooser on the primary
+            // monitor (monitor 1), the sane default.
+            var prim = Services.ScreenCaptureService.GetMonitors().FirstOrDefault(m => m.isPrimary);
+            System.Windows.Point? anchor = prim.width > 0
+                ? new System.Windows.Point(prim.x + prim.width / 2.0, prim.y + prim.height / 2.0)
+                : null;
+            ShowCaptureChooser(shot, CaptureFullScreenNow, anchor);
         }
         catch (Exception ex)
         {
@@ -1694,14 +1710,16 @@ public partial class MainWindow : Window
     /// (Redo / Annotate / Send / Quick save). "Redo" re-runs whatever
     /// capture flow produced this shot. Annotator preferences persist
     /// through the settings passthrough.</summary>
-    private void ShowCaptureChooser(System.Windows.Media.Imaging.BitmapSource shot, Action redo)
+    private void ShowCaptureChooser(System.Windows.Media.Imaging.BitmapSource shot, Action redo,
+        System.Windows.Point? anchor = null)
     {
         Views.CaptureChooser.Show(
             this, shot, _vm.Settings,
             sendToClipNinja: PublishCapture,
             status: s => _vm.StatusText = s,
             redoCapture: redo,
-            persistSettings: () => _vm.ScheduleSave());
+            persistSettings: () => _vm.ScheduleSave(),
+            anchor: anchor);
     }
 
     /// <summary>Put a fresh capture onto the live clipboard. The
@@ -1824,7 +1842,8 @@ public partial class MainWindow : Window
         SlotSearchBox.Text = "";
         // Reset the type filter too — a hidden bar silently filtering
         // the list to "Excel only" would look like data loss.
-        if (TypeFilterCombo is not null) TypeFilterCombo.SelectedIndex = 0;
+        _activeTypeFilter = "All";
+        SyncTypeFilterButtons();
         SlotSearchBar.Visibility = Visibility.Collapsed;
         ApplySlotFilter();   // restores full list
         Keyboard.ClearFocus();
@@ -1864,7 +1883,7 @@ public partial class MainWindow : Window
         var recentView = System.Windows.Data.CollectionViewSource.GetDefaultView(_vm.RecentItems);
 
         string filter = (SlotSearchBox?.Text ?? "").Trim();
-        string typeKey = (TypeFilterCombo?.SelectedItem as ComboBoxItem)?.Tag as string ?? "All";
+        string typeKey = _activeTypeFilter;
 
         if (string.IsNullOrEmpty(filter) && typeKey == "All")
         {
@@ -1902,14 +1921,36 @@ public partial class MainWindow : Window
         if (recentView is not null) recentView.Filter = pred;
     }
 
-    /// <summary>Type-filter combo changed — reapply the combined filter.
-    /// Null-guarded on _vm because SelectionChanged fires during XAML
-    /// parse (SelectedIndex="0") before the constructor has assigned
-    /// the view model.</summary>
-    private void OnTypeFilter_Changed(object sender, SelectionChangedEventArgs e)
+    /// <summary>Active content-type filter key ("All", "Image", "Url",
+    /// "Text", "Html", "Excel"). Backing state for the icon toggle row.</summary>
+    private string _activeTypeFilter = "All";
+
+    /// <summary>Icon toggle clicked. Behaves like a radio group: the
+    /// clicked icon becomes the only lit one. Clicking the ALREADY-lit
+    /// icon clears back to All, so one click in, one click out.</summary>
+    private void OnTypeFilter_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm is null) return;  // XAML parse-time fire
+        if (_vm is null) return;  // defensive: parse-time safety
+        if (sender is not ToggleButton clicked) return;
+        var key = clicked.Tag as string ?? "All";
+
+        // Re-clicking the lit filter (which the toggle has just turned
+        // OFF) means "clear" → back to All.
+        if (clicked.IsChecked != true) key = "All";
+
+        _activeTypeFilter = key;
+        SyncTypeFilterButtons();
         ApplySlotFilter();
+    }
+
+    /// <summary>Light exactly the button matching the active filter.</summary>
+    private void SyncTypeFilterButtons()
+    {
+        foreach (var b in new[] { TypeAll, TypeImage, TypeUrl, TypeText, TypeHtml, TypeExcel })
+        {
+            if (b is null) continue;
+            b.IsChecked = (b.Tag as string ?? "All") == _activeTypeFilter;
+        }
     }
 
     // ── History panel handlers ───────────────────────────────────────────
