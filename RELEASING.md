@@ -26,7 +26,8 @@ One-time setup, then every release is three commands.
 
 1. Bump the version in TWO places (keep them matching):
    - `ClipNinjaV2.csproj` → `<Version>2.7.1</Version>`
-   - `MainWindow.xaml` → header `<Run Text=" v2.7.1"`
+   - `MainWindow.xaml` → header `<Run Text="v2.9.2 "` (version Run
+     comes BEFORE the name Run, and has a TRAILING space)
 
 2. Update `CHANGELOG.md`, commit.
 

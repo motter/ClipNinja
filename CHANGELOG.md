@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.9.2] — 2026-07-14
+
+### Fixed — version number hidden behind the header buttons
+The title block is centered while the window buttons are right-aligned
+on top of it, so adding the 🔍 button in v2.9.1 pushed the button row
+over the trailing version number. The version now sits to the LEFT of
+"🥷 ClipNinja", where there's nothing to collide with — and it stays
+clear no matter how many buttons the header grows.
+
 ## [2.9.1] — 2026-07-14
 
 ### Added — 🔍 search button in the header
