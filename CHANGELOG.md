@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.10.1] — 2026-07-14
+
+### Changed — hover preview is ~50% bigger
+The hover preview was capped at a third of the monitor; it's now half,
+with larger minimum floors (540×360). Both image and text previews get
+the extra room, so you can usually read a clip at a glance without
+opening it full size. Still bounded so it never takes over the screen,
+and large images are downsampled to fit.
+
 ## [2.10.0] — 2026-07-14
 
 ### Changed — annotating a capture sends straight to the tray

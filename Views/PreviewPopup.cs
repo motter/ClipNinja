@@ -163,10 +163,15 @@ public class PreviewPopup
         using var _t = Services.Trace.Time("preview", $"ActuallyShow {label} {content.GetType().Name}");
 
         var workArea = GetMonitorWorkArea(_ownerWindow);
-        int maxW = (int)(workArea.Width / 3);
-        int maxH = (int)(workArea.Height / 3);
-        maxW = Math.Max(maxW, 360);
-        maxH = Math.Max(maxH, 240);
+        // Preview is capped at half the monitor work area (was a third).
+        // A larger preview means you rarely need to open the image full
+        // size just to read it. Still bounded so it never dominates the
+        // screen, and MakePreviewBitmap downsamples to fit — text and
+        // image content both get the extra room.
+        int maxW = (int)(workArea.Width / 2);
+        int maxH = (int)(workArea.Height / 2);
+        maxW = Math.Max(maxW, 540);
+        maxH = Math.Max(maxH, 360);
 
         var popup = new Window
         {
