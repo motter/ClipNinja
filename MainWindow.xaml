@@ -516,7 +516,7 @@
                              (adding 🔍 in v2.9.1 buried the version). Left of
                              the name there's nothing to collide with. -->
                         <TextBlock Style="{StaticResource HeaderTextStyle}">
-                            <Run Text="v2.10.1 "
+                            <Run Text="v2.10.2 "
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />

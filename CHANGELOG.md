@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.10.2] — 2026-07-14
+
+### Added — view the full-size screenshot from the capture popup
+The post-capture popup's preview is a downscaled thumbnail. Now you
+can see the real thing without sending or saving first: **click the
+preview** (or the new **🔍 View full size** link) to open the
+screenshot at actual pixels in a resizable, scrollable viewer. Esc
+closes it. Shows edits too, if you annotated first.
+
 ## [2.10.1] — 2026-07-14
 
 ### Changed — hover preview is ~50% bigger

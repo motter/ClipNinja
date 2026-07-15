@@ -65,8 +65,46 @@ public static class CaptureChooser
             MaxHeight = 260,
             Stretch = Stretch.Uniform,
             Margin = new Thickness(0, 0, 0, 6),
+            Cursor = Cursors.Hand,
+            ToolTip = "Click to view full size",
         };
         root.Children.Add(preview);
+
+        // Open the current image (edits included) in a full-size viewer
+        // window — sized to fit the capture's monitor, scroll for
+        // anything bigger. Shared by the thumbnail click and the
+        // "🔍 View full size" link.
+        void ShowFullImage()
+        {
+            var viewer = new Window
+            {
+                Title = $"Screenshot — {current.PixelWidth} × {current.PixelHeight} px",
+                Owner = dlg,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x17, 0x12)),
+                Width = Math.Min(current.PixelWidth + 40, 1400),
+                Height = Math.Min(current.PixelHeight + 60, 900),
+                WindowStyle = WindowStyle.SingleBorderWindow,
+                ResizeMode = ResizeMode.CanResize,
+                ShowInTaskbar = false,
+            };
+            var scroller = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new Image
+                {
+                    Source = current,
+                    Stretch = Stretch.None,   // true pixels; scroll if larger
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            viewer.Content = scroller;
+            viewer.KeyDown += (_, ke) => { if (ke.Key == Key.Escape) viewer.Close(); };
+            viewer.ShowDialog();
+        }
+        preview.MouseLeftButtonUp += (_, _) => ShowFullImage();
 
         var sizeInfo = new TextBlock
         {
@@ -214,6 +252,20 @@ public static class CaptureChooser
         var footRow = new Grid { Margin = new Thickness(0, 10, 0, 0) };
         footRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        // Left cluster: "🔍 View full size" + "Save as…".
+        var leftLinks = new StackPanel { Orientation = Orientation.Horizontal };
+        var viewFullLink = new TextBlock
+        {
+            Text = "🔍 View full size",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE5, 0x9A, 0x2A)),
+            Cursor = Cursors.Hand,
+            TextDecorations = TextDecorations.Underline,
+            Margin = new Thickness(0, 0, 14, 0),
+            ToolTip = "Open the screenshot at full size",
+        };
+        viewFullLink.MouseLeftButtonDown += (_, _) => ShowFullImage();
+        leftLinks.Children.Add(viewFullLink);
         var saveAsLink = new TextBlock
         {
             Text = "Save as…",
@@ -224,8 +276,9 @@ public static class CaptureChooser
             ToolTip = "Pick a name and folder",
         };
         saveAsLink.MouseLeftButtonDown += (_, _) => SaveAsDialog();
-        Grid.SetColumn(saveAsLink, 0);
-        footRow.Children.Add(saveAsLink);
+        leftLinks.Children.Add(saveAsLink);
+        Grid.SetColumn(leftLinks, 0);
+        footRow.Children.Add(leftLinks);
         var hints = new TextBlock
         {
             Text = "Enter = send  •  Esc = discard",
