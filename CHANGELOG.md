@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.10.3] — 2026-07-14
+
+### Fixed — header buttons overlapped the title
+The title and the button row shared one grid cell (title centered,
+buttons right-aligned on top), so they overlapped — the app name and
+version rendered underneath the icons. The header is now a proper
+two-column layout: title on the left, all controls on the right, in
+separate columns that can't collide no matter how many buttons the
+header grows.
+
+### Changed — header controls look like buttons
+- Bigger touch targets (30×28, was 22×20) with larger glyphs.
+- Each button gets a rounded hover background, so the icons read as
+  real buttons instead of loose glyphs crammed together.
+- A thin divider separates the app actions (search, capture,
+  settings, border) from the window controls (minimize, close).
+- Slightly taller header bar to give it all room to breathe.
+
 ## [2.10.2] — 2026-07-14
 
 ### Added — view the full-size screenshot from the capture popup

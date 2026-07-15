@@ -8,7 +8,7 @@
         <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
 
     <!-- Slot row text -->
@@ -41,25 +41,32 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />
-        <Setter Property="FontFamily" Value="Consolas" />
-        <Setter Property="FontSize" Value="14" />
-        <Setter Property="Width" Value="22" />
-        <Setter Property="Height" Value="20" />
+        <Setter Property="FontFamily" Value="Segoe UI Emoji" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Margin" Value="1,0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}">
+                    <Border x:Name="ChromeBg"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="6">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- Hover fill makes each icon read as its own button
+                             instead of a floating glyph, and the padding gives
+                             them breathing room so they never look crammed. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ChromeBg" Property="Background" Value="#33FFFFFF" />
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            </Trigger>
-        </Style.Triggers>
     </Style>
 
 </ResourceDictionary>

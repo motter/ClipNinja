@@ -497,7 +497,7 @@
                 BorderThickness="1">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="42" />     <!-- Header bar -->
+                    <RowDefinition Height="48" />     <!-- Header bar -->
                     <RowDefinition Height="160" />    <!-- Ninja stage -->
                     <RowDefinition Height="*" />      <!-- Slot list -->
                     <RowDefinition Height="Auto" />   <!-- Footer -->
@@ -509,21 +509,31 @@
                         MouseLeftButtonDown="OnHeader_DragStart"
                         CornerRadius="14,14,0,0">
                     <Grid>
-                        <!-- Version sits to the LEFT of the name. The title
-                             block is centered while the window buttons are
-                             right-aligned ON TOP of it, so anything trailing
-                             the name gets covered once the button row grows
-                             (adding 🔍 in v2.9.1 buried the version). Left of
-                             the name there's nothing to collide with. -->
-                        <TextBlock Style="{StaticResource HeaderTextStyle}">
-                            <Run Text="v2.10.2 "
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />     <!-- title (left) -->
+                            <ColumnDefinition Width="Auto" />  <!-- buttons (right) -->
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Title in its OWN column so the button row can never
+                             overlap it (the old layout centered the title in the
+                             same cell the right-aligned buttons sat on top of —
+                             that's what caused the collision). Version to the
+                             left of the name, both left-aligned, comfy padding. -->
+                        <TextBlock Grid.Column="0"
+                                   Style="{StaticResource HeaderTextStyle}"
+                                   Margin="14,0,0,0">
+                            <Run Text="🥷 ClipNinja" />
+                            <Run Text="  v2.10.3"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
-                            <Run Text="🥷 ClipNinja" />
                         </TextBlock>
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
+
+                        <!-- All actions on one row in the right column, with a
+                             thin divider separating app actions from the
+                             window controls. -->
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
                                     VerticalAlignment="Center"
                                     Margin="0,0,8,0">
                             <!-- Search + type filter. The search bar (with the
@@ -559,12 +569,21 @@
                                     Content="🖼"
                                     Click="OnBorderToggle_Click"
                                     ToolTip="Black border on new screenshots: ON (click to turn off)" />
+                            <!-- Divider between app actions and window controls -->
+                            <Border Width="1" Height="20"
+                                    Background="{StaticResource BorderBrush}"
+                                    Margin="5,0,5,0"
+                                    VerticalAlignment="Center" />
                             <Button Style="{StaticResource WinChromeButtonStyle}"
                                     Content="—"
-                                    Click="OnMinimize_Click" />
+                                    FontFamily="Consolas"
+                                    Click="OnMinimize_Click"
+                                    ToolTip="Minimize" />
                             <Button Style="{StaticResource WinChromeButtonStyle}"
                                     Content="✕"
-                                    Click="OnClose_Click" />
+                                    FontFamily="Consolas"
+                                    Click="OnClose_Click"
+                                    ToolTip="Close to tray" />
                         </StackPanel>
                     </Grid>
                 </Border>
