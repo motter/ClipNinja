@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.10.0] — 2026-07-14
+
+### Changed — annotating a capture sends straight to the tray
+When you Annotate from the post-capture popup, the primary button is
+now **"Save & send to ClipNinja"** — it sends the edited image to the
+tray and closes, no bounce back to the options popup. A secondary
+**"Back to options"** returns your edited image to the popup if you
+still want Save-as or Quick save on the annotated version. (Editing an
+existing tray slot with the pencil is unchanged — Save just updates
+the slot.)
+
+### Added — edit text labels after clicking away
+- In the annotator's Select tool (↖), **double-click any text label to
+  reopen it** — its text, size, and colors are preserved, so you can
+  fix a typo or add a line and commit again.
+- Clicking Save with a text editor still open no longer drops that
+  label; it's committed first.
+- (Note: once an image is sent to the tray it's a flat PNG —
+  annotations are baked in and no longer editable. Re-editing applies
+  while you're still in the annotator.)
+
+### Added — 💾 quick-save badge on image thumbnails
+Image slots now show a 💾 badge at the top-left (mirroring the ✏️
+annotate badge). One click saves a timestamped PNG to your quick-save
+folder — for when you need a file to upload rather than a paste. Same
+one-click save as the right-click menu, minus the right-click.
+
+### Added — "Copy as plain text"
+New right-click item on text slots: puts just the unformatted text on
+the clipboard — no HTML, fonts, colors, or link formatting. The most
+common "clean up what I pasted" operation, now built in.
+
 ## [2.9.2] — 2026-07-14
 
 ### Fixed — version number hidden behind the header buttons

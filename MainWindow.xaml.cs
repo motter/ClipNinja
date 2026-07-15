@@ -974,11 +974,50 @@ public partial class MainWindow : Window
     /// <summary>Pencil badge on the slot thumbnail — same flow as the
     /// context-menu item, one click closer. Handled=true so the click
     /// doesn't bubble up and ALSO fire the row's load-to-clipboard.</summary>
+    /// <summary>Copy just the unformatted text of a slot to the
+    /// clipboard — no HTML, no RTF, no fonts or colors. The single most
+    /// common "clean up what I pasted" operation, and something you
+    /// otherwise need a separate tool for. Uses NativeClipboard.SetText
+    /// so only CF_UNICODETEXT is placed; the receiving app has nothing
+    /// rich to prefer.</summary>
+    private void OnSlotMenu_CopyPlainText(object sender, RoutedEventArgs e)
+    {
+        var slot = GetSlotFrom(sender);
+        if (slot is null || slot.IsEmpty) return;
+
+        string? text = slot.Content switch
+        {
+            Models.TextContent tc => tc.Text,
+            // For an image slot there's no meaningful plain text; the
+            // nickname is the closest thing, else nothing.
+            _ => string.IsNullOrWhiteSpace(slot.Nickname) ? null : slot.Nickname,
+        };
+        if (string.IsNullOrEmpty(text))
+        {
+            _vm.StatusText = "Nothing to copy as plain text";
+            return;
+        }
+        if (Services.NativeClipboard.SetText(text))
+            _vm.StatusText = "📋 Copied as plain text";
+        else
+            _vm.StatusText = "Copy failed — clipboard busy";
+    }
+
     private void OnSlotPencil_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         e.Handled = true;
         var slot = GetSlotFrom(sender);
         if (slot is not null) AnnotateSlot(slot);
+    }
+
+    /// <summary>💾 badge on an image thumbnail — one-click quick save to
+    /// the configured folder. Reuses the exact right-click Save path so
+    /// there's a single implementation. Handled=true so it doesn't also
+    /// load the slot onto the clipboard.</summary>
+    private void OnSlotQuickSave_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        OnSlotMenu_SaveImage(sender, e);
     }
 
     private void AnnotateSlot(Models.ClipSlot slot)

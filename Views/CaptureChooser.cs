@@ -160,9 +160,19 @@ public static class CaptureChooser
         annotateBtn.Click += (_, _) =>
         {
             // The annotator opens modally ON TOP of this chooser (it's
-            // the owner) and we swap in the edited image when it
-            // returns. Annotator preferences persist via settings.
-            var edited = ImageAnnotator.Show(dlg, current, settings, persistSettings);
+            // the owner). In send mode its primary button is "Save &
+            // send to ClipNinja" — which sends straight to the tray and
+            // closes BOTH windows (no bounce back here). Its secondary
+            // "Back to options" returns the edited image to this chooser
+            // (for save-as / quick-save on an annotated shot).
+            bool sent = false;
+            var edited = ImageAnnotator.Show(dlg, current, settings, persistSettings,
+                onSendToTray: img =>
+                {
+                    sendToClipNinja(img);
+                    sent = true;
+                });
+            if (sent) { dlg.Close(); return; }
             if (edited is not null)
             {
                 current = edited;

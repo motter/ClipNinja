@@ -56,16 +56,31 @@ public static class ImageAnnotator
         public string Kind = "";
         public Point P1;
         public Point P2;
+        // Text-label fields (Kind == "text"), so a committed label can be
+        // reopened for editing with its content and styling intact.
+        public string Text = "";
+        public double FontSizePx = 18;
+        public Color Fg = Colors.White;
+        public Color Bg = Colors.Black;
     }
 
+    /// <param name="onSendToTray">When provided, the primary Save button
+    /// becomes "Save &amp; send" and calls this with the flattened image
+    /// instead of returning it — the annotator closes straight to the
+    /// tray, no bounce back to the capture chooser. A secondary
+    /// "Back to options" button still returns the edited image normally.
+    /// When null (e.g. editing an existing tray slot), Save behaves the
+    /// classic way and returns the result.</param>
     public static BitmapSource? Show(Window owner, BitmapSource source,
-        Models.AppSettings? settings = null, Action? persistSettings = null)
+        Models.AppSettings? settings = null, Action? persistSettings = null,
+        Action<BitmapSource>? onSendToTray = null)
     {
         // Last-used preferences (color / size / text style) load from
         // settings when provided and save back on a successful Save —
         // pick clay red + large once and every future session opens
         // that way. Null settings (legacy callers) = golden defaults.
         BitmapSource? result = null;
+        bool sentToTray = false;
 
         var dlg = new Window
         {
@@ -538,13 +553,19 @@ public static class ImageAnnotator
         // meta — which is what makes it RESIZABLE with the Select
         // tool's corner handles. The child text stays centered, so
         // growing the box adds breathing room around the words.
+        // The one text editor currently open (if any), so Save can flush
+        // it and double-click-to-reedit can avoid stacking editors.
+        TextBox? activeTextEditor = null;
+
         void CommitTextEditor(TextBox editor)
         {
             var text = (editor.Text ?? "").TrimEnd('\r', '\n', ' ', '\t');
             double x = Canvas.GetLeft(editor);
             double y = Canvas.GetTop(editor);
             overlay.Children.Remove(editor);
+            if (ReferenceEquals(activeTextEditor, editor)) activeTextEditor = null;
             if (string.IsNullOrWhiteSpace(text)) return;  // empty = never happened
+            var textFg = editor.Foreground;
             var label = new Border
             {
                 Background = editor.Background,
@@ -556,7 +577,7 @@ public static class ImageAnnotator
                     Text = text,
                     FontSize = editor.FontSize,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = editor.Foreground,
+                    Foreground = textFg,
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -573,12 +594,46 @@ public static class ImageAnnotator
             double h = label.DesiredSize.Height + 12;
             label.Width = w;
             label.Height = h;
-            label.Tag = new AnnotMeta { Kind = "text", P1 = new Point(x, y), P2 = new Point(x + w, y + h) };
+            // Meta carries the text + styling so the label can be
+            // REOPENED for editing (double-click in Select mode) with
+            // everything preserved — not just moved/resized.
+            label.Tag = new AnnotMeta
+            {
+                Kind = "text",
+                P1 = new Point(x, y),
+                P2 = new Point(x + w, y + h),
+                Text = text,
+                FontSizePx = editor.FontSize,
+                Fg = (editor.Foreground as SolidColorBrush)?.Color ?? currentColor,
+                Bg = (editor.Background as SolidColorBrush)?.Color ?? TintedDark(currentColor),
+            };
             Canvas.SetLeft(label, x);
             Canvas.SetTop(label, y);
             overlay.Children.Add(label);
             undoStack.Add(label);
             undoBtn.IsEnabled = true;
+        }
+
+        // Flush any open text editor (called on Save so a label being
+        // typed isn't silently dropped).
+        void CommitOpenTextEditor()
+        {
+            if (activeTextEditor is not null && overlay.Children.Contains(activeTextEditor))
+                CommitTextEditor(activeTextEditor);
+        }
+
+        // Reopen an existing text label for editing: remove the label,
+        // drop a fresh editor in its place pre-filled with its text and
+        // styling. Used by double-click in Select mode.
+        void ReopenTextLabel(Border label)
+        {
+            if (label.Tag is not AnnotMeta m || m.Kind != "text") return;
+            double x = Canvas.GetLeft(label);
+            double y = Canvas.GetTop(label);
+            overlay.Children.Remove(label);
+            undoStack.Remove(label);
+            ClearSelection();
+            PlaceTextEditor(new Point(x, y), m.Text, m.FontSizePx, m.Fg, m.Bg);
         }
 
         // Mix the chosen color into a dark base for the label
@@ -603,16 +658,17 @@ public static class ImageAnnotator
         // Place a live text editor at the click point, styled to match
         // the final label exactly. Enter adds a NEW LINE (memo-style);
         // Ctrl+Enter or clicking elsewhere commits; Esc cancels.
-        void PlaceTextEditor(Point at)
+        void PlaceTextEditor(Point at, string? prefillText = null, double? prefillSize = null,
+            Color? prefillFg = null, Color? prefillBg = null)
         {
-            var fgBrush = new SolidColorBrush(currentColor);
+            var fgBrush = new SolidColorBrush(prefillFg ?? currentColor);
             fgBrush.Freeze();
-            var bgBrush = new SolidColorBrush(
-                textStyle == "light" ? TintedLight(currentColor) : TintedDark(currentColor));
+            var bgBrush = new SolidColorBrush(prefillBg ??
+                (textStyle == "light" ? TintedLight(currentColor) : TintedDark(currentColor)));
             bgBrush.Freeze();
             var editor = new TextBox
             {
-                FontSize = textSize,
+                FontSize = prefillSize ?? textSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = fgBrush,
                 Background = bgBrush,
@@ -623,12 +679,14 @@ public static class ImageAnnotator
                 AcceptsReturn = true,     // Enter = new line
                 TextAlignment = TextAlignment.Center,
                 Padding = new Thickness(8, 4, 8, 4),
+                Text = prefillText ?? "",
                 ToolTip = "Enter = new line • Ctrl+Enter or click away = done • Esc = cancel",
             };
+            activeTextEditor = editor;
             Canvas.SetLeft(editor, at.X);
             Canvas.SetTop(editor, at.Y);
             overlay.Children.Add(editor);
-            editor.Loaded += (_, _) => editor.Focus();
+            editor.Loaded += (_, _) => { editor.Focus(); editor.CaretIndex = editor.Text.Length; };
             editor.KeyDown += (_, ke) =>
             {
                 if (ke.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
@@ -911,10 +969,17 @@ public static class ImageAnnotator
         overlay.MouseLeftButtonDown += (_, e) =>
         {
             // Select mode: hit-test annotations; click body to select +
-            // start moving, click empty space to deselect.
+            // start moving, click empty space to deselect. DOUBLE-click a
+            // text label to reopen it for editing.
             if (currentTool == Tool.Select)
             {
                 var hit = HitAnnotation(e.OriginalSource);
+                if (e.ClickCount == 2 && hit is Border b && MetaOf(b)?.Kind == "text")
+                {
+                    ReopenTextLabel(b);
+                    e.Handled = true;
+                    return;
+                }
                 if (hit is not null && MetaOf(hit) is not null)
                 {
                     selected = hit;
@@ -1070,17 +1135,35 @@ public static class ImageAnnotator
             IsCancel = true,
             Cursor = Cursors.Hand,
         };
+        // In send mode, offer a secondary "Back to options" that returns
+        // the edited image to the chooser instead of sending — so the
+        // chooser flow (Save-as, quick-save) is still reachable for
+        // people who annotated first.
+        Button? backBtn = null;
+        if (onSendToTray is not null)
+        {
+            backBtn = new Button
+            {
+                Content = "Back to options",
+                Padding = new Thickness(14, 5, 14, 5),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Return to the capture options (save-as, quick-save) with your edits",
+            };
+        }
         var saveBtn = new Button
         {
-            Content = "Save annotations",
+            // Send mode: Save means "send straight to ClipNinja" — the
+            // common case, and what you asked for (no bounce back).
+            Content = onSendToTray is not null ? "Save & send to ClipNinja" : "Save annotations",
             Padding = new Thickness(14, 5, 14, 5),
             FontWeight = FontWeights.Bold,
             Cursor = Cursors.Hand,
         };
-        saveBtn.Click += (_, _) =>
+        // Shared: persist prefs, clear handles, flatten. Returns the
+        // flattened image or null if nothing was drawn.
+        BitmapSource? PrepareResult()
         {
-            // Persist last-used preferences so the next session opens
-            // with this exact setup (color, size, text style).
             if (settings is not null)
             {
                 settings.AnnotatorDefaultColor = HexOf(currentColor);
@@ -1088,20 +1171,46 @@ public static class ImageAnnotator
                 settings.AnnotatorTextStyle = textStyle;
                 persistSettings?.Invoke();
             }
+            // Commit any text editor still open (clicking Save with the
+            // caret in a label shouldn't silently drop that label).
+            CommitOpenTextEditor();
             // Clear selection FIRST — handles live on a layer inside the
             // rendered surface, and baked-in selection handles would be
             // a terrible souvenir.
             ClearSelection();
-            if (undoStack.Count == 0)
+            if (undoStack.Count == 0) return null;
+            return Flatten(source, surface);
+        }
+
+        saveBtn.Click += (_, _) =>
+        {
+            var flat = PrepareResult();
+            if (onSendToTray is not null)
             {
-                // Nothing drawn — treat as cancel, no re-encode churn.
-                dlg.DialogResult = false;
+                // Send mode: hand the image straight to the tray and
+                // close. Nothing drawn → still send the plain capture
+                // (Save on an untouched shot means "I'm done, take it").
+                onSendToTray(flat ?? source);
+                sentToTray = true;
+                dlg.DialogResult = true;
                 return;
             }
-            result = Flatten(source, surface);
-            dlg.DialogResult = result is not null;
+            // Classic mode: return the result to the caller.
+            if (flat is null) { dlg.DialogResult = false; return; }
+            result = flat;
+            dlg.DialogResult = true;
         };
+        if (backBtn is not null)
+        {
+            backBtn.Click += (_, _) =>
+            {
+                // Return the edited image to the chooser without sending.
+                result = PrepareResult();
+                dlg.DialogResult = result is not null;
+            };
+        }
         btnRow.Children.Add(cancelBtn);
+        if (backBtn is not null) btnRow.Children.Add(backBtn);
         btnRow.Children.Add(saveBtn);
         Grid.SetRow(btnRow, 2);
         root.Children.Add(btnRow);

@@ -45,6 +45,8 @@
                         <MenuItem Header="⬇️ Move down"        Click="OnSlotMenu_MoveDown" />
                         <Separator />
                         <MenuItem Header="✏️ Edit text…"      Click="OnSlotMenu_EditText" />
+                        <MenuItem Header="📋 Copy as plain text" Click="OnSlotMenu_CopyPlainText"
+                                  ToolTip="Put just the unformatted text on the clipboard — strips fonts, colors, and links" />
                         <MenuItem Header="🖍️ Annotate image…" Click="OnSlotMenu_AnnotateImage" />
                         <MenuItem Header="💾 Save image to folder" Click="OnSlotMenu_SaveImage" />
                         <MenuItem Header="🗑️ Remove this item" Click="OnSlotMenu_Clear" />
@@ -125,6 +127,23 @@
                                     ToolTip="Annotate this image"
                                     MouseLeftButtonDown="OnSlotPencil_Click">
                                 <TextBlock Text="✏️" FontSize="8" />
+                            </Border>
+                            <!-- Quick-save badge — 💾 at top-LEFT. One click
+                                 writes a timestamped PNG to the quick-save
+                                 folder (falls back to Save-as if unset), so
+                                 you can grab a file to upload without the
+                                 right-click menu. Handled=true so it doesn't
+                                 load the slot. -->
+                            <Border HorizontalAlignment="Left"
+                                    VerticalAlignment="Top"
+                                    Background="#CC2A2620"
+                                    CornerRadius="2"
+                                    Padding="2,0,2,1"
+                                    Margin="1,1,0,0"
+                                    Cursor="Hand"
+                                    ToolTip="Quick-save this image to a file"
+                                    MouseLeftButtonDown="OnSlotQuickSave_Click">
+                                <TextBlock Text="💾" FontSize="8" />
                             </Border>
                         </Grid>
                     </Border>
@@ -497,7 +516,7 @@
                              (adding 🔍 in v2.9.1 buried the version). Left of
                              the name there's nothing to collide with. -->
                         <TextBlock Style="{StaticResource HeaderTextStyle}">
-                            <Run Text="v2.9.2 "
+                            <Run Text="v2.10.0 "
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
