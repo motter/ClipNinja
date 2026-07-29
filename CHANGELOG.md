@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.11.1] — 2026-07-15
+
+### Changed — "View full size" now expands in place (no second window)
+Viewing the full-size capture used to open a separate viewer window on
+top of the "Screenshot captured" popup, leaving the small popup behind
+it. Now the popup itself expands: clicking the preview (or the
+"🔍 View full size" link) grows the same window to show the image
+large, bounded to the capture's monitor, with the Redo / Annotate /
+Send / Quick save buttons still right there. Click again (or the
+"🔍 Hide full size" link) to shrink back. One window, no background
+clutter — inspect the shot, then send or save it without closing
+anything.
+
 ## [2.11.0] — 2026-07-15
 
 ### Added — resize the image from the annotator

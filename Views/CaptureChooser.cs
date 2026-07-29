@@ -56,6 +56,41 @@ public static class CaptureChooser
 
         var root = new StackPanel { Margin = new Thickness(14) };
 
+        // Forward declaration: the "View / hide full size" link is built
+        // in the footer below, but the expand toggle (defined earlier)
+        // needs to update its text. Null until the footer creates it.
+        TextBlock? viewFullLink = null;
+
+        // Resolve which monitor the popup belongs on and return its work
+        // area in DIUs (device-independent units), matching WPF's Left/
+        // Top/ActualWidth. anchor is in physical px (capture center);
+        // falls back to the primary monitor.
+        (double leftDiu, double topDiu, double wDiu, double hDiu) MonitorFor(Point? anchorPt)
+        {
+            try
+            {
+                var mons = Services.ScreenCaptureService.GetMonitors();
+                var target = mons.FirstOrDefault(m => m.isPrimary);
+                if (anchorPt is { } a)
+                {
+                    foreach (var m in mons)
+                    {
+                        if (a.X >= m.x && a.X < m.x + m.width &&
+                            a.Y >= m.y && a.Y < m.y + m.height)
+                        { target = m; break; }
+                    }
+                }
+                if (target.width <= 0) return (0, 0, 0, 0);
+                var src = PresentationSource.FromVisual(dlg);
+                double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+                double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
+                if (sx <= 0) sx = 1.0;
+                if (sy <= 0) sy = 1.0;
+                return (target.x / sx, target.y / sy, target.width / sx, target.height / sy);
+            }
+            catch { return (0, 0, 0, 0); }
+        }
+
         // Preview — scaled to fit a modest box; the actual bitmap is
         // untouched.
         var preview = new Image
@@ -70,40 +105,41 @@ public static class CaptureChooser
         };
         root.Children.Add(preview);
 
-        // Open the current image (edits included) in a full-size viewer
-        // window — sized to fit the capture's monitor, scroll for
-        // anything bigger. Shared by the thumbnail click and the
-        // "🔍 View full size" link.
-        void ShowFullImage()
+        // Toggle the preview between the small thumbnail and a large,
+        // in-place view — NO second window. Clicking the preview (or the
+        // "View / hide full size" link) grows the same chooser to show
+        // the image big, with the action buttons still right there so
+        // you can Send / Save / Annotate straight after inspecting.
+        // Bounded to the capture's monitor; the window re-centers itself
+        // via the Loaded/size-changed placement below.
+        bool expanded = false;
+        void SetPreviewExpanded(bool big)
         {
-            var viewer = new Window
+            expanded = big;
+            var mon = MonitorFor(anchor);
+            if (big)
             {
-                Title = $"Screenshot — {current.PixelWidth} × {current.PixelHeight} px",
-                Owner = dlg,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x17, 0x12)),
-                Width = Math.Min(current.PixelWidth + 40, 1400),
-                Height = Math.Min(current.PixelHeight + 60, 900),
-                WindowStyle = WindowStyle.SingleBorderWindow,
-                ResizeMode = ResizeMode.CanResize,
-                ShowInTaskbar = false,
-            };
-            var scroller = new ScrollViewer
+                // Fit within ~85% of the monitor work area (DIU), keeping
+                // aspect. Uniform stretch means small captures don't get
+                // upscaled past their pixels.
+                double capW = mon.wDiu * 0.85, capH = mon.hDiu * 0.85 - 160; // leave room for buttons
+                preview.MaxWidth = Math.Max(420, capW);
+                preview.MaxHeight = Math.Max(260, capH);
+                preview.ToolTip = "Click to shrink back";
+            }
+            else
             {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = new Image
-                {
-                    Source = current,
-                    Stretch = Stretch.None,   // true pixels; scroll if larger
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
-            viewer.Content = scroller;
-            viewer.KeyDown += (_, ke) => { if (ke.Key == Key.Escape) viewer.Close(); };
-            viewer.ShowDialog();
+                preview.MaxWidth = 420;
+                preview.MaxHeight = 260;
+                preview.ToolTip = "Click to view full size";
+            }
+            if (viewFullLink is not null)
+                viewFullLink.Text = big ? "🔍 Hide full size" : "🔍 View full size";
+            // SizeToContent re-measures; re-center on the next layout pass.
+            dlg.Dispatcher.BeginInvoke(new Action(RecenterOnMonitor),
+                System.Windows.Threading.DispatcherPriority.Loaded);
         }
+        void ShowFullImage() => SetPreviewExpanded(!expanded);
         preview.MouseLeftButtonUp += (_, _) => ShowFullImage();
 
         var sizeInfo = new TextBlock
@@ -254,7 +290,7 @@ public static class CaptureChooser
         footRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         // Left cluster: "🔍 View full size" + "Save as…".
         var leftLinks = new StackPanel { Orientation = Orientation.Horizontal };
-        var viewFullLink = new TextBlock
+        viewFullLink = new TextBlock
         {
             Text = "🔍 View full size",
             FontSize = 11,
@@ -262,7 +298,7 @@ public static class CaptureChooser
             Cursor = Cursors.Hand,
             TextDecorations = TextDecorations.Underline,
             Margin = new Thickness(0, 0, 14, 0),
-            ToolTip = "Open the screenshot at full size",
+            ToolTip = "Show the screenshot large, right here (click again to shrink)",
         };
         viewFullLink.MouseLeftButtonDown += (_, _) => ShowFullImage();
         leftLinks.Children.Add(viewFullLink);
@@ -292,38 +328,29 @@ public static class CaptureChooser
 
         // Place the popup on the monitor the capture came from, centered.
         // WPF window coords are DIUs while monitor rects are physical px;
-        // convert via the window's DPI scale.
-        dlg.Loaded += (_, _) =>
+        // convert via the window's DPI scale. RecenterOnMonitor keeps the
+        // popup centered on the capture's monitor after any size change
+        // (initial show, and expand/collapse of the preview).
+        void RecenterOnMonitor()
         {
             try
             {
-                var mons = Services.ScreenCaptureService.GetMonitors();
-                var target = mons.FirstOrDefault(m => m.isPrimary);
-                if (anchor is { } a)
+                var m = MonitorFor(anchor);
+                if (m.wDiu > 0)
                 {
-                    foreach (var m in mons)
-                    {
-                        if (a.X >= m.x && a.X < m.x + m.width &&
-                            a.Y >= m.y && a.Y < m.y + m.height)
-                        { target = m; break; }
-                    }
-                }
-                if (target.width > 0)
-                {
-                    var src = PresentationSource.FromVisual(dlg);
-                    double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-                    double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
-                    if (sx <= 0) sx = 1.0;
-                    if (sy <= 0) sy = 1.0;
-                    // Monitor rect in DIUs, then center the (already
-                    // measured, thanks to SizeToContent) popup in it.
-                    double mLeft = target.x / sx, mTop = target.y / sy;
-                    double mW = target.width / sx, mH = target.height / sy;
-                    dlg.Left = mLeft + (mW - dlg.ActualWidth) / 2;
-                    dlg.Top = mTop + (mH - dlg.ActualHeight) / 2;
+                    dlg.Left = m.leftDiu + (m.wDiu - dlg.ActualWidth) / 2;
+                    dlg.Top = m.topDiu + (m.hDiu - dlg.ActualHeight) / 2;
+                    // Clamp so a tall expanded preview never runs off the
+                    // top of the monitor.
+                    if (dlg.Top < m.topDiu) dlg.Top = m.topDiu;
+                    if (dlg.Left < m.leftDiu) dlg.Left = m.leftDiu;
                 }
             }
             catch { /* fall back to wherever WPF put it */ }
+        }
+        dlg.Loaded += (_, _) =>
+        {
+            RecenterOnMonitor();
             dlg.Activate();
             dlg.Focus();
         };
