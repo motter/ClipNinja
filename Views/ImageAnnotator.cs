@@ -336,12 +336,17 @@ public static class ImageAnnotator
         };
         void UpdateScaleDims() =>
             scaleDims.Text = $"→ {(int)Math.Round(source.PixelWidth * outputScale)}×{(int)Math.Round(source.PixelHeight * outputScale)}";
+        // Set once the surface exists (below): applies the visual scale so
+        // the editing view reflects the chosen size. Declared here because
+        // the combo is built before the surface.
+        Action<double>? applyViewScale = null;
         scaleCombo.SelectionChanged += (_, _) =>
         {
             if (scaleCombo.SelectedItem is ComboBoxItem ci && ci.Tag is double f)
             {
                 outputScale = f;
                 UpdateScaleDims();
+                applyViewScale?.Invoke(f);
             }
         };
         UpdateScaleDims();
@@ -393,6 +398,22 @@ public static class ImageAnnotator
             Background = null,  // clicks pass through empty areas
         };
         surface.Children.Add(handleLayer);
+
+        // Visual scale: the Size dropdown now scales what you SEE, not
+        // just the saved file. A LayoutTransform on the surface makes the
+        // editing view grow/shrink and the ScrollViewer adapt. Crucially,
+        // mouse handlers read e.GetPosition(overlay), which returns
+        // coordinates in the overlay's OWN (un-scaled) space regardless
+        // of this transform — so drawing still lands pixel-accurately in
+        // native image coordinates. Flatten resets this transform before
+        // rendering, so the saved output is clean.
+        applyViewScale = s =>
+        {
+            surface.LayoutTransform = Math.Abs(s - 1.0) < 0.001
+                ? Transform.Identity
+                : new ScaleTransform(s, s);
+        };
+        applyViewScale(outputScale);   // honor a non-1.0 default
 
         var scroller = new ScrollViewer
         {
@@ -1288,13 +1309,18 @@ public static class ImageAnnotator
     /// </summary>
     private static BitmapSource? Flatten(BitmapSource source, Grid surface, double scale = 1.0)
     {
+        // The surface may carry a LayoutTransform (the on-screen view
+        // scale from the Size dropdown). Reset it to Identity so we
+        // render the base 1:1 surface and apply the scale ONCE via DPI
+        // below — otherwise the output would be double-scaled. Restored
+        // after (harmless even though the dialog is closing).
+        var savedTransform = surface.LayoutTransform;
         try
         {
-            // Ensure layout is current — the surface is live in the
-            // visual tree so this is usually a no-op, but belt and
-            // suspenders before rendering.
+            surface.LayoutTransform = Transform.Identity;
             surface.Measure(new Size(source.PixelWidth, source.PixelHeight));
             surface.Arrange(new Rect(0, 0, source.PixelWidth, source.PixelHeight));
+            surface.UpdateLayout();
 
             // Output dimensions scale by the chosen factor. Rendering the
             // vector surface at a higher DPI (rather than upscaling a
@@ -1317,6 +1343,10 @@ public static class ImageAnnotator
         catch
         {
             return null;
+        }
+        finally
+        {
+            surface.LayoutTransform = savedTransform;
         }
     }
 }

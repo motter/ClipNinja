@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.11.5] — 2026-07-15
+
+### Fixed — the Size dropdown now scales the on-screen image too
+Changing the annotator's Size dropdown only affected the saved/sent
+file, not what you were looking at — so picking 2.00× appeared to do
+nothing. The editing view now scales with the dropdown (the surface
+grows/shrinks and the scroll area adapts), so it's WYSIWYG. Drawing
+stays pixel-accurate because annotation coordinates are still tracked
+in the image's native space regardless of the on-screen zoom, and the
+saved output is rendered cleanly at the chosen size.
+
 ## [2.11.4] — 2026-07-15
 
 ### Changed — annotate pencil moved to its own action icon
