@@ -92,16 +92,34 @@ public static class CaptureChooser
         }
 
         // Preview — scaled to fit a modest box; the actual bitmap is
-        // untouched.
-        var preview = new Image
+        // untouched. Wrapped in a Button so a click toggles the
+        // expand-in-place view: Button.Click fires exactly once per
+        // genuine press-and-release on the same control, which a raw
+        // MouseLeftButtonUp does NOT — because the image resizes under
+        // the cursor on expand, the tail of that same click landed on
+        // the newly-grown image and fired a second up-event, toggling it
+        // straight back (the "quick click makes it vanish, but hold
+        // works" bug). The Button's built-in click detection is immune
+        // to that.
+        var previewImg = new Image
         {
             Source = current,
             MaxWidth = 420,
             MaxHeight = 260,
             Stretch = Stretch.Uniform,
+        };
+        var preview = new Button
+        {
+            Content = previewImg,
+            Background = System.Windows.Media.Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 0, 6),
             Cursor = Cursors.Hand,
             ToolTip = "Click to view full size",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            // Bare template: no default button chrome, just the image.
+            Template = MakeChromelessButtonTemplate(),
         };
         root.Children.Add(preview);
 
@@ -123,14 +141,14 @@ public static class CaptureChooser
                 // aspect. Uniform stretch means small captures don't get
                 // upscaled past their pixels.
                 double capW = mon.wDiu * 0.85, capH = mon.hDiu * 0.85 - 160; // leave room for buttons
-                preview.MaxWidth = Math.Max(420, capW);
-                preview.MaxHeight = Math.Max(260, capH);
+                previewImg.MaxWidth = Math.Max(420, capW);
+                previewImg.MaxHeight = Math.Max(260, capH);
                 preview.ToolTip = "Click to shrink back";
             }
             else
             {
-                preview.MaxWidth = 420;
-                preview.MaxHeight = 260;
+                previewImg.MaxWidth = 420;
+                previewImg.MaxHeight = 260;
                 preview.ToolTip = "Click to view full size";
             }
             if (viewFullLink is not null)
@@ -140,7 +158,7 @@ public static class CaptureChooser
                 System.Windows.Threading.DispatcherPriority.Loaded);
         }
         void ShowFullImage() => SetPreviewExpanded(!expanded);
-        preview.MouseLeftButtonUp += (_, _) => ShowFullImage();
+        preview.Click += (_, _) => ShowFullImage();
 
         var sizeInfo = new TextBlock
         {
@@ -364,5 +382,17 @@ public static class CaptureChooser
 
         dlg.Content = root;
         dlg.ShowDialog();
+    }
+
+    /// <summary>A ControlTemplate that strips all default Button chrome
+    /// (border, background brushes, hover/pressed animation) so the
+    /// button is visually just its content — here, the preview image —
+    /// while still giving us Button's reliable single-Click behavior.</summary>
+    private static System.Windows.Controls.ControlTemplate MakeChromelessButtonTemplate()
+    {
+        var presenter = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter));
+        presenter.SetValue(System.Windows.Controls.ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        presenter.SetValue(System.Windows.Controls.ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        return new System.Windows.Controls.ControlTemplate(typeof(Button)) { VisualTree = presenter };
     }
 }
