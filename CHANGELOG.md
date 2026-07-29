@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.11.4] — 2026-07-15
+
+### Changed — annotate pencil moved to its own action icon
+The annotate pencil used to be a tiny emoji badge on the thumbnail
+that was hard to see. It's now a proper vector pencil icon in the
+action-icon row, just to the left of the pin lock (in line with the
+up/down arrows and the eraser). It only appears on image slots, picks
+up the same hover/active highlight as the other icons, and clicking it
+opens the annotator as before. The right-click "Annotate image…" menu
+item still works too. (The 💾 quick-save badge stays on the thumbnail.)
+
 ## [2.11.3] — 2026-07-15
 
 ### Fixed — full-size preview flickered back on a quick click

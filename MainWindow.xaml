@@ -57,6 +57,7 @@
                         <ColumnDefinition Width="28" />   <!-- index badge -->
                         <ColumnDefinition Width="36" />   <!-- thumbnail -->
                         <ColumnDefinition Width="*" />    <!-- text -->
+                        <ColumnDefinition Width="22" />   <!-- annotate pencil (image slots only) -->
                         <ColumnDefinition Width="22" />   <!-- pin lock indicator -->
                         <ColumnDefinition Width="22" />   <!-- arrows -->
                         <ColumnDefinition Width="26" />   <!-- eraser -->
@@ -112,28 +113,14 @@
                                            FontWeight="Bold"
                                            Foreground="White" />
                             </Border>
-                            <!-- Annotate badge — pencil at top-right of the
-                                 thumbnail. Click opens the annotation editor
-                                 directly (the right-click menu item still
-                                 exists too). Handled=true in the handler so
-                                 the click doesn't ALSO load the slot. -->
-                            <Border HorizontalAlignment="Right"
-                                    VerticalAlignment="Top"
-                                    Background="#CC2A2620"
-                                    CornerRadius="2"
-                                    Padding="2,0,2,1"
-                                    Margin="0,1,1,0"
-                                    Cursor="Hand"
-                                    ToolTip="Annotate this image"
-                                    MouseLeftButtonDown="OnSlotPencil_Click">
-                                <TextBlock Text="✏️" FontSize="8" />
-                            </Border>
                             <!-- Quick-save badge — 💾 at top-LEFT. One click
                                  writes a timestamped PNG to the quick-save
                                  folder (falls back to Save-as if unset), so
                                  you can grab a file to upload without the
                                  right-click menu. Handled=true so it doesn't
-                                 load the slot. -->
+                                 load the slot. (The annotate pencil moved out
+                                 to its own column by the lock — it was too
+                                 small to see here.) -->
                             <Border HorizontalAlignment="Left"
                                     VerticalAlignment="Top"
                                     Background="#CC2A2620"
@@ -295,13 +282,53 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Annotate pencil — sits just left of the lock, in
+                         line with the arrows and eraser. Only shown for
+                         image slots (you can't annotate text). Drawn as a
+                         vector pencil so it's crisp and picks up the same
+                         hover/active foreground as the other action icons,
+                         unlike the tiny hard-to-see emoji badge it replaces. -->
+                    <Border x:Name="PencilBtn"
+                            Grid.Column="3"
+                            Background="Transparent"
+                            Cursor="Hand"
+                            ToolTip="Annotate this image"
+                            Visibility="{Binding HasImage, Converter={StaticResource BoolToVis}}"
+                            MouseLeftButtonDown="OnSlotPencil_Click"
+                            MouseLeftButtonUp="OnIconBtn_MouseUp"
+                            TextElement.Foreground="{StaticResource BorderBrush}">
+                        <Viewbox Width="14" Height="14"
+                                 VerticalAlignment="Center"
+                                 HorizontalAlignment="Center">
+                            <Canvas Width="22" Height="22">
+                                <!-- Pencil body -->
+                                <Path Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"
+                                      StrokeThickness="1.5"
+                                      StrokeLineJoin="Round"
+                                      Fill="Transparent"
+                                      Data="M 5,17 L 15,7 L 18,10 L 8,20 L 4,21 Z" />
+                                <!-- Pencil tip (filled nib) -->
+                                <Path Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"
+                                      StrokeThickness="1.5"
+                                      StrokeLineJoin="Round"
+                                      Fill="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"
+                                      Opacity="0.55"
+                                      Data="M 4,21 L 8,20 L 5,17 Z" />
+                                <!-- Eraser-end ferrule (the band near the top) -->
+                                <Path Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource AncestorType=Border}}"
+                                      StrokeThickness="1.5"
+                                      Data="M 13,9 L 16,12" />
+                            </Canvas>
+                        </Viewbox>
+                    </Border>
+
                     <!-- Pin lock indicator. Always visible: shows OPEN padlock
                          when unpinned (clickable to lock), CLOSED padlock when
                          pinned (clickable to unlock). The Border captures clicks
                          across the full cell so the hit zone is much bigger
                          than the tiny icon. -->
                     <Border x:Name="LockHitZone"
-                            Grid.Column="3"
+                            Grid.Column="4"
                             Background="Transparent"
                             Cursor="Hand"
                             ToolTip="Click to pin / unpin this slot"
@@ -366,7 +393,7 @@
                     </Border>
 
                     <!-- Up/Down reorder arrows. -->
-                    <StackPanel Grid.Column="4"
+                    <StackPanel Grid.Column="5"
                                 Orientation="Vertical"
                                 VerticalAlignment="Center"
                                 HorizontalAlignment="Center">
@@ -392,7 +419,7 @@
                     <!-- Eraser button (Power BI-style angled eraser) to clear this slot.
                          The wrapping Border catches clicks across the full cell. -->
                     <Border x:Name="EraserBtn"
-                            Grid.Column="5"
+                            Grid.Column="6"
                             Background="Transparent"
                             Cursor="Hand"
                             ToolTip="Clear this slot"
@@ -439,6 +466,7 @@
                     <Setter TargetName="DownArrow" Property="Foreground" Value="{StaticResource TextBrush}" />
                     <Setter TargetName="LockHitZone" Property="TextElement.Foreground" Value="{StaticResource TextBrush}" />
                     <Setter TargetName="EraserBtn" Property="TextElement.Foreground" Value="{StaticResource TextBrush}" />
+                    <Setter TargetName="PencilBtn" Property="TextElement.Foreground" Value="{StaticResource TextBrush}" />
                 </DataTrigger>
                 <!-- Pinned slot — yellow index badge -->
                 <DataTrigger Binding="{Binding IsPinned}" Value="True">
@@ -523,7 +551,7 @@
                                    Style="{StaticResource HeaderTextStyle}"
                                    Margin="14,0,0,0">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text="  v2.11.3"
+                            <Run Text="  v2.11.4"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
