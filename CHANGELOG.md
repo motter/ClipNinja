@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.11.3] — 2026-07-15
+
+### Fixed — full-size preview flickered back on a quick click
+Clicking the capture preview to expand it only "held" while the mouse
+button was down; a quick click expanded and instantly collapsed it.
+Cause: the preview toggled on a raw mouse-up event, and expanding
+resized the image *under the cursor*, so the tail of that same click
+landed on the newly-grown image and fired a second up-event that undid
+the expand. The preview is now a proper button whose click fires
+exactly once per press-and-release regardless of the resize — single
+click expands and stays, click again to shrink.
+
+(v2.11.2 carried this fix but failed to build — a leftover property
+reference and a wrong dependency-property name; corrected here.)
+
 ## [2.11.2] — 2026-07-15
 
 ### Fixed — full-size preview flickered back on a quick click

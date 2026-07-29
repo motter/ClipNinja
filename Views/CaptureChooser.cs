@@ -268,7 +268,7 @@ public static class CaptureChooser
             if (edited is not null)
             {
                 current = edited;
-                preview.Source = current;
+                previewImg.Source = current;   // Button's inner Image
                 sizeInfo.Text = $"{current.PixelWidth} × {current.PixelHeight} px";
             }
         };
@@ -391,8 +391,8 @@ public static class CaptureChooser
     private static System.Windows.Controls.ControlTemplate MakeChromelessButtonTemplate()
     {
         var presenter = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter));
-        presenter.SetValue(System.Windows.Controls.ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        presenter.SetValue(System.Windows.Controls.ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        presenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        presenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
         return new System.Windows.Controls.ControlTemplate(typeof(Button)) { VisualTree = presenter };
     }
 }

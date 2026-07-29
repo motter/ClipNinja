@@ -523,7 +523,7 @@
                                    Style="{StaticResource HeaderTextStyle}"
                                    Margin="14,0,0,0">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text="  v2.11.2"
+                            <Run Text="  v2.11.3"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
