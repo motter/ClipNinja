@@ -656,9 +656,9 @@ public static class ImageAnnotator
             var label = new Border
             {
                 Background = editor.Background,
-                BorderBrush = editor.BorderBrush,
-                BorderThickness = new Thickness(1.5),
-                CornerRadius = new CornerRadius(3),
+                BorderBrush = editor.BorderBrush,   // = the chosen swatch color (red = #E8382A)
+                BorderThickness = new Thickness(2.5),   // slightly thicker for a stronger frame
+                CornerRadius = new CornerRadius(5),     // rounder, matching the box tool
                 Child = new TextBlock
                 {
                     Text = text,
@@ -760,7 +760,7 @@ public static class ImageAnnotator
                 Foreground = fgBrush,
                 Background = bgBrush,
                 BorderBrush = fgBrush,
-                BorderThickness = new Thickness(1.5),
+                BorderThickness = new Thickness(2.5),   // match the committed label
                 CaretBrush = fgBrush,
                 MinWidth = 60,
                 AcceptsReturn = true,     // Enter = new line

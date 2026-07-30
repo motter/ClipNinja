@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.1] — 2026-07-15
+
+### Changed — text label borders
+Text label borders are slightly thicker now (2.5px, was 1.5) for a
+stronger frame, with a touch more corner rounding to match the box
+tool. The border already uses your chosen swatch color, so a red text
+label uses the same stark #E8382A red as everything else — live editor
+and committed label match, so it's WYSIWYG.
+
 ## [2.12.0] — 2026-07-15
 
 ### Changed — annotator polish
