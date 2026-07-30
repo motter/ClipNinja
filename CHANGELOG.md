@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.0] — 2026-07-15
+
+### Changed — annotator polish
+- **Rounded corners** on the box and highlight tools for a softer,
+  more finished look (the box's radius scales gently with stroke
+  width). Obfuscate stays sharp-cornered so it can't leak
+  un-blurred corners.
+- **Punchier red swatch** — the "Clay red" is now a stark vermilion
+  (#E8382A) that pops against a screenshot without being fire-engine
+  harsh. If you had the old red saved as your default, it carries
+  over to the new one automatically.
+
 ## [2.11.5] — 2026-07-15
 
 ### Fixed — the Size dropdown now scales the on-screen image too

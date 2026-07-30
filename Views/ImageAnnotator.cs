@@ -200,15 +200,20 @@ public static class ImageAnnotator
             (Color.FromRgb(0xE5, 0x9A, 0x2A), "Amber"),
             (Color.FromRgb(0x7F, 0xB0, 0x69), "Agave green"),
             (Color.FromRgb(0x8D, 0xA9, 0xB8), "Sky blue"),
-            (Color.FromRgb(0xD9, 0x55, 0x3F), "Clay red"),
+            (Color.FromRgb(0xE8, 0x38, 0x2A), "Red"),   // stark vermilion — reads clearly as "look here"
         };
         // Last-used color from settings ("#RRGGBB"); unknown → Sun gold.
         static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         var currentColor = swatchDefs[0].color;
         if (settings is not null)
         {
+            // Migrate the old clay red (#D9553F) to the new stark red so
+            // anyone who had red saved keeps red instead of silently
+            // reverting to gold.
+            var saved = string.Equals(settings.AnnotatorDefaultColor, "#D9553F", StringComparison.OrdinalIgnoreCase)
+                ? "#E8382A" : settings.AnnotatorDefaultColor;
             foreach (var (color, _) in swatchDefs)
-                if (string.Equals(HexOf(color), settings.AnnotatorDefaultColor, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(HexOf(color), saved, StringComparison.OrdinalIgnoreCase))
                 { currentColor = color; break; }
         }
         var swatchButtons = new List<Border>();
@@ -530,6 +535,11 @@ public static class ImageAnnotator
                     {
                         Stroke = stroke,
                         StrokeThickness = strokeWidth,
+                        // Rounded corners for a softer, more polished look.
+                        // Scales gently with stroke width so thin and thick
+                        // boxes both look intentional rather than fixed-radius.
+                        RadiusX = 6 + strokeWidth,
+                        RadiusY = 6 + strokeWidth,
                         Width = Math.Abs(b.X - a.X),
                         Height = Math.Abs(b.Y - a.Y),
                         Tag = new AnnotMeta { Kind = "box", P1 = a, P2 = b },
@@ -563,6 +573,8 @@ public static class ImageAnnotator
                     var rect = new Rectangle
                     {
                         Fill = fill,
+                        RadiusX = 5,   // gently rounded to match the box tool
+                        RadiusY = 5,
                         Width = w,
                         Height = h,
                         Tag = new AnnotMeta { Kind = "highlight", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
