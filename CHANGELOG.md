@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.12.2] — 2026-07-15
+
+### Fixed — small boxes turned into circles
+The rounded-corner radius was fixed, so a small box or highlight had
+its whole side eaten by the curve and collapsed into a circle/oval.
+The radius now scales with the shape: it's capped at ~22% of the
+shorter side, so small boxes keep a clear straight edge and read as
+rounded rectangles, while larger boxes still get the full rounding.
+The radius also updates live as you resize a box with the Select tool.
+
 ## [2.12.1] — 2026-07-15
 
 ### Changed — text label borders

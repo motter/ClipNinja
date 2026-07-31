@@ -531,17 +531,19 @@ public static class ImageAnnotator
             {
                 case Tool.Box:
                 {
+                    double bw = Math.Abs(b.X - a.X), bh = Math.Abs(b.Y - a.Y);
+                    // Radius scales with stroke for large boxes but is
+                    // capped to the shape size so small boxes stay
+                    // rectangular instead of collapsing to a circle.
+                    double r = RoundedCornerRadius(bw, bh, 6 + strokeWidth);
                     var rect = new Rectangle
                     {
                         Stroke = stroke,
                         StrokeThickness = strokeWidth,
-                        // Rounded corners for a softer, more polished look.
-                        // Scales gently with stroke width so thin and thick
-                        // boxes both look intentional rather than fixed-radius.
-                        RadiusX = 6 + strokeWidth,
-                        RadiusY = 6 + strokeWidth,
-                        Width = Math.Abs(b.X - a.X),
-                        Height = Math.Abs(b.Y - a.Y),
+                        RadiusX = r,
+                        RadiusY = r,
+                        Width = bw,
+                        Height = bh,
                         Tag = new AnnotMeta { Kind = "box", P1 = a, P2 = b },
                     };
                     Canvas.SetLeft(rect, Math.Min(a.X, b.X));
@@ -573,8 +575,8 @@ public static class ImageAnnotator
                     var rect = new Rectangle
                     {
                         Fill = fill,
-                        RadiusX = 5,   // gently rounded to match the box tool
-                        RadiusY = 5,
+                        RadiusX = RoundedCornerRadius(w, h, 5),   // proportional, matches the box tool
+                        RadiusY = RoundedCornerRadius(w, h, 5),
                         Width = w,
                         Height = h,
                         Tag = new AnnotMeta { Kind = "highlight", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
@@ -877,6 +879,16 @@ public static class ImageAnnotator
                         fe.Height = Math.Max(m.Kind == "text" ? 18 : 4, Math.Abs(m.P2.Y - m.P1.Y));
                         Canvas.SetLeft(fe, x);
                         Canvas.SetTop(fe, y);
+                        // Keep rounded corners proportional as the shape is
+                        // resized — otherwise shrinking a box to small would
+                        // leave a too-big radius and collapse it to a circle.
+                        if (fe is Rectangle rr)
+                        {
+                            double desired = m.Kind == "box" ? 6 + rr.StrokeThickness : 5;
+                            double r = RoundedCornerRadius(fe.Width, fe.Height, desired);
+                            rr.RadiusX = r;
+                            rr.RadiusY = r;
+                        }
                     }
                     break;
                 case "number":
@@ -1319,6 +1331,21 @@ public static class ImageAnnotator
     /// pixel-perfect output (all ClipNinja bitmaps are 96-DPI
     /// normalized by the capture pipeline).
     /// </summary>
+    /// <summary>Corner radius for a rounded box/highlight that stays
+    /// proportional to the shape's size. A fixed radius turns a SMALL
+    /// box into a circle/stadium (the radius eats the whole side); this
+    /// caps the radius at a fraction of the shorter side so there's
+    /// always a visible straight edge, while large boxes still get the
+    /// full "nice" radius. Also floored at 0 for degenerate sizes.</summary>
+    private static double RoundedCornerRadius(double width, double height, double desired)
+    {
+        double shorter = Math.Min(Math.Abs(width), Math.Abs(height));
+        // 22% of the shorter side leaves ~56% of each side straight, so
+        // it clearly reads as a rounded rectangle, never a circle.
+        double cap = shorter * 0.22;
+        return Math.Max(0, Math.Min(desired, cap));
+    }
+
     private static BitmapSource? Flatten(BitmapSource source, Grid surface, double scale = 1.0)
     {
         // The surface may carry a LayoutTransform (the on-screen view
