@@ -56,6 +56,24 @@ public static class CaptureChooser
 
         var root = new StackPanel { Margin = new Thickness(14) };
 
+        // Let the user drag the popup out of the way by grabbing any
+        // empty part of it — handy when the capture they want to redo (or
+        // grab next) is hidden behind this window. Buttons, links, and the
+        // preview handle their own clicks and set e.Handled, so dragging
+        // only kicks in on the background. The title bar still drags too.
+        root.MouseLeftButtonDown += (s, e) =>
+        {
+            // Only start a drag when the press landed on the background
+            // itself (the StackPanel or a plain TextBlock) — not on a
+            // button, link, or the preview. Prevents a click on "Save
+            // as…" from also dragging the window.
+            if (e.OriginalSource is System.Windows.Controls.Panel or System.Windows.Controls.TextBlock
+                && e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                try { dlg.DragMove(); } catch { /* DragMove throws if button already up */ }
+            }
+        };
+
         // Forward declaration: the "View / hide full size" link is built
         // in the footer below, but the expand toggle (defined earlier)
         // needs to update its text. Null until the footer creates it.
@@ -318,7 +336,7 @@ public static class CaptureChooser
             Margin = new Thickness(0, 0, 14, 0),
             ToolTip = "Show the screenshot large, right here (click again to shrink)",
         };
-        viewFullLink.MouseLeftButtonDown += (_, _) => ShowFullImage();
+        viewFullLink.MouseLeftButtonDown += (_, e) => { e.Handled = true; ShowFullImage(); };
         leftLinks.Children.Add(viewFullLink);
         var saveAsLink = new TextBlock
         {
@@ -329,7 +347,7 @@ public static class CaptureChooser
             TextDecorations = TextDecorations.Underline,
             ToolTip = "Pick a name and folder",
         };
-        saveAsLink.MouseLeftButtonDown += (_, _) => SaveAsDialog();
+        saveAsLink.MouseLeftButtonDown += (_, e) => { e.Handled = true; SaveAsDialog(); };
         leftLinks.Children.Add(saveAsLink);
         Grid.SetColumn(leftLinks, 0);
         footRow.Children.Add(leftLinks);

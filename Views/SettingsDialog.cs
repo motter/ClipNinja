@@ -97,63 +97,28 @@ public static class SettingsDialog
         };
         root.Children.Add(borderCheck);
 
-        var shadowCheck = MakeCheck("Add drop shadow to captured images",
-            "Bake a soft shadow on the right and bottom edges so screenshots visually lift off the page when pasted. Applies to NEW captures only.",
+        // Single "polished look" toggle — the one control the user asked
+        // for. ON = soft Greenshot-style drop shadow + torn top/bottom
+        // edges together; OFF = neither. (The four-independent-sides
+        // control was overkill; this is the look people actually want.)
+        var polishedCheck = MakeCheck("Polished look on captured images (soft shadow + torn edges)",
+            "Bake a soft drop shadow around new screenshots plus a subtle torn-paper top and bottom edge — the clean 'lifted off the page' look. Applies to NEW captures only.",
             settings.AddDropShadowToImages, fg, subFg);
-        shadowCheck.Click += (_, _) =>
+        polishedCheck.Click += (_, _) =>
         {
-            settings.AddDropShadowToImages = shadowCheck.IsChecked == true;
+            bool on = polishedCheck.IsChecked == true;
+            // One toggle drives both effects in lockstep.
+            settings.AddDropShadowToImages = on;
+            settings.AddTornTopEdge = on;
+            settings.AddTornBottomEdge = on;
+            // Left/right torn edges stay off — top+bottom reads as a strip
+            // torn from a page, which is the tasteful subset. (Full
+            // four-side tearing looked gimmicky.)
+            settings.AddTornLeftEdge = false;
+            settings.AddTornRightEdge = false;
             onSettingsChanged();
         };
-        root.Children.Add(shadowCheck);
-
-        // Torn edges: compact single row with 4 side checkboxes. All
-        // four ON gives the full "torn out of a magazine" look; top+
-        // bottom only reads as a strip torn from a page.
-        root.Children.Add(new TextBlock
-        {
-            Text = "Torn edges on captured images",
-            Foreground = fg,
-            FontSize = 12,
-            Margin = new Thickness(0, 6, 0, 2),
-        });
-        root.Children.Add(new TextBlock
-        {
-            Text = "Ragged torn-paper edges baked into new captures. Check all four for the 'ripped out of an article' look.",
-            Foreground = subFg,
-            FontSize = 10,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 4),
-        });
-        var tornRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(12, 0, 0, 8),
-        };
-        CheckBox MakeTornSide(string label, bool initial, Action<bool> apply)
-        {
-            var cb = new CheckBox
-            {
-                Content = label,
-                IsChecked = initial,
-                Foreground = fg,
-                FontSize = 11,
-                Margin = new Thickness(0, 0, 14, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            cb.Click += (_, _) =>
-            {
-                apply(cb.IsChecked == true);
-                onSettingsChanged();
-            };
-            tornRow.Children.Add(cb);
-            return cb;
-        }
-        MakeTornSide("Top", settings.AddTornTopEdge, v => settings.AddTornTopEdge = v);
-        MakeTornSide("Bottom", settings.AddTornBottomEdge, v => settings.AddTornBottomEdge = v);
-        MakeTornSide("Left", settings.AddTornLeftEdge, v => settings.AddTornLeftEdge = v);
-        MakeTornSide("Right", settings.AddTornRightEdge, v => settings.AddTornRightEdge = v);
-        root.Children.Add(tornRow);
+        root.Children.Add(polishedCheck);
 
         // ── Quick-save section ───────────────────────────────────────
         root.Children.Add(SectionHeader("Quick-save screenshots", accent));

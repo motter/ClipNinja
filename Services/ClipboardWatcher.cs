@@ -202,7 +202,10 @@ public class ClipboardWatcher : IDisposable
                     {
                         using (Trace.Time("watcher", "AddDropShadow"))
                         {
-                            bmp = AddDropShadow(bmp, offsetPx: 8, blurPx: 6);
+                            // Softer, larger radius with a gentle offset —
+                            // the clean Greenshot-style shadow that wraps
+                            // all four sides.
+                            bmp = AddDropShadow(bmp, offsetPx: 4, blurPx: 12);
                             wasModified = true;
                         }
                     }
@@ -822,75 +825,88 @@ public class ClipboardWatcher : IDisposable
     /// Output at 96 DPI to match AddBlackBorder's DIU semantics —
     /// prevents inconsistent paste sizes on high-DPI displays.
     /// </summary>
+    /// <summary>
+    /// Greenshot-style soft drop shadow: the image gets a transparent
+    /// margin on ALL sides, with a soft dark shadow that surrounds it and
+    /// sits slightly below-right. Unlike the old offset-only shadow (hard
+    /// top-left edge, shadow only on two sides), this pads every side so
+    /// the image floats on a soft shadow — the clean look you get from
+    /// Greenshot. `blurPx` is the softness radius; `offsetPx` nudges the
+    /// shadow down-right so the light reads as coming from top-left.
+    /// </summary>
     public static BitmapSource AddDropShadow(BitmapSource src, int offsetPx, int blurPx)
     {
-        if (src.PixelWidth == 0 || src.PixelHeight == 0 || (offsetPx + blurPx) <= 0) return src;
+        if (src.PixelWidth == 0 || src.PixelHeight == 0 || blurPx <= 0) return src;
         try
         {
             int srcW = src.PixelWidth;
             int srcH = src.PixelHeight;
-            int padRight = offsetPx + blurPx;
-            int padBottom = offsetPx + blurPx;
-            int outerW = srcW + padRight;
-            int outerH = srcH + padBottom;
+
+            // Uniform margin on every side so the shadow can extend all
+            // the way around. Extra room on the down-right for the offset.
+            int margin = blurPx + 2;
+            int padLeft = margin;
+            int padTop = margin;
+            int padRight = margin + offsetPx;
+            int padBottom = margin + offsetPx;
+            int outerW = srcW + padLeft + padRight;
+            int outerH = srcH + padTop + padBottom;
 
             var bgra = src.Format == System.Windows.Media.PixelFormats.Bgra32
                 ? src
                 : new FormatConvertedBitmap(src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
-
             int srcStride = srcW * 4;
             var srcPixels = new byte[srcStride * srcH];
             bgra.CopyPixels(srcPixels, srcStride, 0);
 
             int outStride = outerW * 4;
-            var outPixels = new byte[outStride * outerH]; // starts transparent
+            var outPixels = new byte[outStride * outerH]; // transparent
 
-            // Draw the shadow first — a soft dark region under where the
-            // image WILL be (offset down + right by offsetPx), fading
-            // out over `blurPx` pixels. Peak shadow alpha ~120 (of 255).
-            // The shadow rectangle is the image bounds shifted; alpha at
-            // any (x,y) is peak-alpha * (dist-from-outer-edge / blurPx),
-            // clamped, for both horizontal and vertical falloff. This
-            // gives soft corners without needing a per-pixel gaussian.
-            const int peakAlpha = 120;
-            int shadowLeft = offsetPx;
-            int shadowTop = offsetPx;
-            int shadowRight = shadowLeft + srcW;   // exclusive
-            int shadowBottom = shadowTop + srcH;   // exclusive
+            // Shadow rectangle = image bounds shifted down-right by offset.
+            // Alpha falls off smoothly outside that rect over blurPx using
+            // a smoothstep curve (softer, more natural than linear), giving
+            // the rounded, feathered edges Greenshot has on all four sides.
+            const int peakAlpha = 110;
+            int shLeft = padLeft + offsetPx;
+            int shTop = padTop + offsetPx;
+            int shRight = shLeft + srcW;   // exclusive
+            int shBottom = shTop + srcH;   // exclusive
+
+            static double Smooth(double t)   // smoothstep 0..1
+            {
+                if (t <= 0) return 0;
+                if (t >= 1) return 1;
+                return t * t * (3 - 2 * t);
+            }
+
             for (int y = 0; y < outerH; y++)
             {
                 int rowBase = y * outStride;
-                // Vertical falloff factor: 1.0 inside the shadow band,
-                // linearly falling to 0 outside within blurPx pixels.
-                double vFactor;
-                if (y >= shadowTop && y < shadowBottom) vFactor = 1.0;
-                else if (y < shadowTop) vFactor = Math.Max(0, 1.0 - (double)(shadowTop - y) / blurPx);
-                else vFactor = Math.Max(0, 1.0 - (double)(y - shadowBottom + 1) / blurPx);
-                if (vFactor <= 0) continue;
+                double vF;
+                if (y >= shTop && y < shBottom) vF = 1.0;
+                else if (y < shTop) vF = Smooth(1.0 - (double)(shTop - y) / blurPx);
+                else vF = Smooth(1.0 - (double)(y - shBottom + 1) / blurPx);
+                if (vF <= 0) continue;
 
                 for (int x = 0; x < outerW; x++)
                 {
-                    double hFactor;
-                    if (x >= shadowLeft && x < shadowRight) hFactor = 1.0;
-                    else if (x < shadowLeft) hFactor = Math.Max(0, 1.0 - (double)(shadowLeft - x) / blurPx);
-                    else hFactor = Math.Max(0, 1.0 - (double)(x - shadowRight + 1) / blurPx);
-                    if (hFactor <= 0) continue;
+                    double hF;
+                    if (x >= shLeft && x < shRight) hF = 1.0;
+                    else if (x < shLeft) hF = Smooth(1.0 - (double)(shLeft - x) / blurPx);
+                    else hF = Smooth(1.0 - (double)(x - shRight + 1) / blurPx);
+                    if (hF <= 0) continue;
 
-                    byte a = (byte)(peakAlpha * vFactor * hFactor);
+                    byte a = (byte)(peakAlpha * vF * hF);
                     if (a == 0) continue;
-                    int p = rowBase + x * 4;
-                    // BGRA = 0,0,0,a  (opaque black premultiplied by alpha)
-                    outPixels[p + 3] = a;
+                    outPixels[rowBase + x * 4 + 3] = a;   // black, premultiplied
                 }
             }
 
-            // Now blit source pixels at top-left. This overwrites any
-            // shadow that happened to be under the image area (which is
-            // fine — the image is opaque there).
+            // Blit the image on top, at its padded position.
             for (int y = 0; y < srcH; y++)
             {
                 int srcRow = y * srcStride;
-                int dstRow = y * outStride;
+                int dstRow = (y + padTop) * outStride + padLeft * 4;
                 System.Buffer.BlockCopy(srcPixels, srcRow, outPixels, dstRow, srcStride);
             }
 

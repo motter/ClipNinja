@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.13.0] — 2026-07-16
+
+### Fixed — the "Screenshot captured" popup can now be moved
+The post-capture popup was stuck in place, so if the thing you wanted
+to capture next was hidden behind it, you were stuck. You can now drag
+it out of the way by grabbing any empty part of it (the title bar works
+too). Buttons and links still click normally.
+
+### Changed — cleaner, Greenshot-style drop shadow + one toggle
+- The drop shadow is rebuilt: a soft shadow that wraps all four sides
+  with feathered (smoothstep) edges and a gentle offset, instead of the
+  old hard-edged shadow that only appeared on the right and bottom. It's
+  the clean "lifted off the page" look from Greenshot.
+- The separate drop-shadow checkbox and the four torn-edge checkboxes
+  are replaced by a single **"Polished look"** toggle that turns the
+  shadow and a subtle torn top/bottom edge on or off together.
+
 ## [2.12.2] — 2026-07-15
 
 ### Fixed — small boxes turned into circles
