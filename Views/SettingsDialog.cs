@@ -97,23 +97,22 @@ public static class SettingsDialog
         };
         root.Children.Add(borderCheck);
 
-        // Single "polished look" toggle — the one control the user asked
-        // for. ON = soft Greenshot-style drop shadow + torn top/bottom
-        // edges together; OFF = neither. (The four-independent-sides
-        // control was overkill; this is the look people actually want.)
-        var polishedCheck = MakeCheck("Polished look on captured images (soft shadow + torn edges)",
-            "Bake a soft drop shadow around new screenshots plus a subtle torn-paper top and bottom edge — the clean 'lifted off the page' look. Applies to NEW captures only.",
+        // Single "polished look" toggle — a clean soft drop shadow on a
+        // white backing, exactly like Greenshot. Torn edges were dropped:
+        // they rely on transparency, which the Windows clipboard discards,
+        // so they'd paste as black or vanish on white. Shadow-on-white
+        // survives paste everywhere.
+        var polishedCheck = MakeCheck("Polished look on captured images (soft drop shadow)",
+            "Bake a soft Greenshot-style drop shadow around new screenshots so they lift off the page when pasted into a document. Applies to NEW captures only.",
             settings.AddDropShadowToImages, fg, subFg);
         polishedCheck.Click += (_, _) =>
         {
             bool on = polishedCheck.IsChecked == true;
-            // One toggle drives both effects in lockstep.
             settings.AddDropShadowToImages = on;
-            settings.AddTornTopEdge = on;
-            settings.AddTornBottomEdge = on;
-            // Left/right torn edges stay off — top+bottom reads as a strip
-            // torn from a page, which is the tasteful subset. (Full
-            // four-side tearing looked gimmicky.)
+            // Torn edges are no longer part of the polished look — force
+            // them off so an old saved setting can't resurrect them.
+            settings.AddTornTopEdge = false;
+            settings.AddTornBottomEdge = false;
             settings.AddTornLeftEdge = false;
             settings.AddTornRightEdge = false;
             onSettingsChanged();

@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.13.3] — 2026-07-16
+
+### Fixed — drop shadow showed as a solid black border
+The "Polished look" shadow was pasting as a thick solid-black border
+instead of a soft shadow. Cause: the shadow was built on a transparent
+margin, but the Windows clipboard's bitmap format drops the alpha
+channel — so every transparent and semi-transparent shadow pixel
+collapsed to solid black on paste. (Turning off the separate black
+border didn't help because the black wasn't the border — it was the
+shadow losing its transparency.)
+
+The shadow is now baked onto an opaque white backing, so there's no
+alpha to lose: it pastes as a clean soft gray shadow on white, exactly
+like Greenshot dropping into a document — on every paste target.
+
+### Changed — Polished look is shadow-only
+Torn edges are removed from the Polished look. They depend on
+transparency too, so on the clipboard they'd either turn black or
+vanish into a white document. The toggle is now simply a clean soft
+drop shadow, which is the Greenshot look you were after.
+
 ## [2.13.2] — 2026-07-16
 
 ### Fixed — Grab region now hides ALL ClipNinja windows, not just the annotator

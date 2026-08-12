@@ -879,6 +879,21 @@ public class ClipboardWatcher : IDisposable
                 return t * t * (3 - 2 * t);
             }
 
+            // Fill the whole canvas with OPAQUE WHITE first. The shadow is
+            // then composited on top as gray. This is the key fix: the
+            // Windows clipboard's bitmap format drops the alpha channel,
+            // so a transparent shadow margin collapses to solid BLACK when
+            // pasted. By baking everything onto an opaque background there
+            // is no alpha to lose — the shadow survives as a soft gray,
+            // exactly how Greenshot looks pasted into a document.
+            for (int i = 0; i < outPixels.Length; i += 4)
+            {
+                outPixels[i + 0] = 255; // B
+                outPixels[i + 1] = 255; // G
+                outPixels[i + 2] = 255; // R
+                outPixels[i + 3] = 255; // A (opaque)
+            }
+
             for (int y = 0; y < outerH; y++)
             {
                 int rowBase = y * outStride;
@@ -896,13 +911,20 @@ public class ClipboardWatcher : IDisposable
                     else hF = Smooth(1.0 - (double)(x - shRight + 1) / blurPx);
                     if (hF <= 0) continue;
 
-                    byte a = (byte)(peakAlpha * vF * hF);
-                    if (a == 0) continue;
-                    outPixels[rowBase + x * 4 + 3] = a;   // black, premultiplied
+                    // Darken white toward black by the shadow strength —
+                    // i.e. composite black at alpha `t` over the white bg.
+                    double t = (peakAlpha / 255.0) * vF * hF;
+                    if (t <= 0) continue;
+                    byte v = (byte)Math.Round(255 * (1 - t));
+                    int p = rowBase + x * 4;
+                    outPixels[p + 0] = v;
+                    outPixels[p + 1] = v;
+                    outPixels[p + 2] = v;
+                    // alpha stays 255 (opaque)
                 }
             }
 
-            // Blit the image on top, at its padded position.
+            // Blit the image on top, at its padded position (opaque).
             for (int y = 0; y < srcH; y++)
             {
                 int srcRow = y * srcStride;
