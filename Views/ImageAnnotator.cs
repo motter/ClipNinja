@@ -287,6 +287,23 @@ public static class ImageAnnotator
         };
         toolbar.Children.Add(pasteBtn);
 
+        // 📷 Grab region — capture a NEW region of the screen and drop it
+        // onto the canvas. Solves "I need a shot of what's behind this
+        // window": the annotator hides itself, you drag-select the
+        // region, and it comes back with the capture pasted in as a
+        // movable object. (Wired after PasteImageFromClipboard exists.)
+        var grabBtn = new Button
+        {
+            Content = "📷",
+            FontSize = 12,
+            Width = 32,
+            Height = 26,
+            Margin = new Thickness(4, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            ToolTip = "Grab another screen region and drop it onto this image (hides the annotator while you select)",
+        };
+        toolbar.Children.Add(grabBtn);
+
         var undoBtn = new Button
         {
             Content = "↩ Undo",
@@ -1026,36 +1043,7 @@ public static class ImageAnnotator
             {
                 if (!Clipboard.ContainsImage()) return;
                 var img = Clipboard.GetImage();
-                if (img is null) return;
-                double w = img.PixelWidth, h = img.PixelHeight;
-                // Fit within 70% of the canvas so a full-screen paste
-                // doesn't bury the base image.
-                double maxW = source.PixelWidth * 0.7, maxH = source.PixelHeight * 0.7;
-                double scale = Math.Min(1.0, Math.Min(maxW / w, maxH / h));
-                w = Math.Max(16, w * scale);
-                h = Math.Max(16, h * scale);
-                double x = Math.Max(0, (source.PixelWidth - w) / 2);
-                double y = Math.Max(0, (source.PixelHeight - h) / 2);
-                var el = new Image
-                {
-                    Source = img,
-                    Width = w,
-                    Height = h,
-                    Stretch = Stretch.Fill,
-                    Tag = new AnnotMeta { Kind = "paste", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
-                };
-                Canvas.SetLeft(el, x);
-                Canvas.SetTop(el, y);
-                overlay.Children.Add(el);
-                undoStack.Add(el);
-                undoBtn.IsEnabled = true;
-                // Auto-select it so the user can immediately move or
-                // resize the fresh paste — switch to Select mode.
-                currentTool = Tool.Select;
-                foreach (var kv in toolButtons) kv.Value.IsChecked = kv.Key == Tool.Select;
-                overlay.Cursor = Cursors.Arrow;
-                selected = el;
-                RefreshHandles();
+                if (img is not null) PlacePastedImage(img);
             }
             catch (Exception ex)
             {
@@ -1063,7 +1051,62 @@ public static class ImageAnnotator
             }
         }
 
+        // Drop a bitmap onto the canvas as a movable, resizable object.
+        // Shared by clipboard paste and the "grab region" button.
+        void PlacePastedImage(BitmapSource img)
+        {
+            double w = img.PixelWidth, h = img.PixelHeight;
+            // Fit within 70% of the canvas so a full-screen paste
+            // doesn't bury the base image.
+            double maxW = source.PixelWidth * 0.7, maxH = source.PixelHeight * 0.7;
+            double scale = Math.Min(1.0, Math.Min(maxW / w, maxH / h));
+            w = Math.Max(16, w * scale);
+            h = Math.Max(16, h * scale);
+            double x = Math.Max(0, (source.PixelWidth - w) / 2);
+            double y = Math.Max(0, (source.PixelHeight - h) / 2);
+            var el = new Image
+            {
+                Source = img,
+                Width = w,
+                Height = h,
+                Stretch = Stretch.Fill,
+                Tag = new AnnotMeta { Kind = "paste", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
+            };
+            Canvas.SetLeft(el, x);
+            Canvas.SetTop(el, y);
+            overlay.Children.Add(el);
+            undoStack.Add(el);
+            undoBtn.IsEnabled = true;
+            // Auto-select it so the user can immediately move or
+            // resize the fresh paste — switch to Select mode.
+            currentTool = Tool.Select;
+            foreach (var kv in toolButtons) kv.Value.IsChecked = kv.Key == Tool.Select;
+            overlay.Cursor = Cursors.Arrow;
+            selected = el;
+            RefreshHandles();
+        }
+
+        // Grab a new screen region and drop it onto the canvas. Hide the
+        // annotator first so it isn't in the shot (and so the user can
+        // see whatever was behind it), then restore it. Runs on the
+        // dispatcher after a short delay so the hide fully paints before
+        // the frozen-screen selector snapshots the desktop.
+        void GrabRegionIntoCanvas()
+        {
+            dlg.Hide();
+            dlg.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                BitmapSource? shot = null;
+                try { shot = Views.RegionSelectorWindow.SelectAndCapture(); }
+                catch (Exception ex) { Services.Trace.Log("annotate", $"grab region failed: {ex.Message}"); }
+                dlg.Show();
+                dlg.Activate();
+                if (shot is not null) PlacePastedImage(shot);
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
         pasteBtn.Click += (_, _) => PasteImageFromClipboard();
+        grabBtn.Click += (_, _) => GrabRegionIntoCanvas();
 
         overlay.MouseLeftButtonDown += (_, e) =>
         {

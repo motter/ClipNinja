@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.13.1] — 2026-07-16
+
+### Added — grab another region from inside the annotator
+The annotator is a focused editing window, so you couldn't capture
+something that was hidden behind it. New **📷 Grab region** button in
+the annotator toolbar (next to 📋 paste): it hides the annotator, lets
+you drag-select a new region of the screen — including whatever was
+behind the annotator — and drops that capture onto your image as a
+movable, resizable object. Perfect for building a job aid or ticket
+from several shots.
+
 ## [2.13.0] — 2026-07-16
 
 ### Fixed — the "Screenshot captured" popup can now be moved
