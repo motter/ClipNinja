@@ -34,7 +34,7 @@ public static class CaptureChooser
     /// rather than wherever ClipNinja's main window happens to live.
     /// Null → primary monitor.</param>
     public static void Show(Window owner, BitmapSource shot, AppSettings settings,
-        Action<BitmapSource> sendToClipNinja, Action<string> status, Action redoCapture,
+        Action<BitmapSource, bool> sendToClipNinja, Action<string> status, Action redoCapture,
         Action? persistSettings = null, Point? anchor = null)
     {
         var current = shot;  // may be replaced by an annotated version
@@ -279,7 +279,8 @@ public static class CaptureChooser
             var edited = ImageAnnotator.Show(dlg, current, settings, persistSettings,
                 onSendToTray: img =>
                 {
-                    sendToClipNinja(img);
+                    // The annotator already baked its per-image effects.
+                    sendToClipNinja(img, true);
                     sent = true;
                 });
             if (sent) { dlg.Close(); return; }
@@ -293,7 +294,9 @@ public static class CaptureChooser
 
         sendBtn.Click += (_, _) =>
         {
-            sendToClipNinja(current);
+            // Plain send: not baked here — PublishCapture applies the
+            // global effect settings.
+            sendToClipNinja(current, false);
             dlg.Close();
         };
 

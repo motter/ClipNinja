@@ -375,6 +375,62 @@ public static class ImageAnnotator
         toolbar.Children.Add(scaleCombo);
         toolbar.Children.Add(scaleDims);
 
+        // ── Presentation effects (border / shadow / torn) ─────────────
+        // Per-image toggles that bake into the saved/sent output and show
+        // a live preview on the canvas. Initialized from the global
+        // capture defaults so the app-wide "Polished look" carries over,
+        // but each image can override. Torn reveals the shadow beneath,
+        // so enabling Torn also switches Shadow on.
+        bool fxBorder = settings?.AddBorderToImages ?? false;
+        bool fxShadow = settings?.AddDropShadowToImages ?? false;
+        bool fxTorn = settings is not null &&
+            (settings.AddTornTopEdge || settings.AddTornBottomEdge ||
+             settings.AddTornLeftEdge || settings.AddTornRightEdge);
+        // Preview hook, assigned once the surface + backing exist (below).
+        Action? refreshEffectPreview = null;
+
+        ToggleButton MakeFxButton(string glyph, string tip, bool initial, Action<bool> onToggle)
+        {
+            var tb = new ToggleButton
+            {
+                Content = glyph,
+                FontSize = 13,
+                Width = 32,
+                Height = 26,
+                Margin = new Thickness(4, 0, 0, 0),
+                IsChecked = initial,
+                Cursor = Cursors.Hand,
+                ToolTip = tip,
+            };
+            tb.Checked += (_, _) => { onToggle(true); refreshEffectPreview?.Invoke(); };
+            tb.Unchecked += (_, _) => { onToggle(false); refreshEffectPreview?.Invoke(); };
+            return tb;
+        }
+
+        toolbar.Children.Add(new TextBlock
+        {
+            Text = "  FX:",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x82, 0x74)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12, 0, 0, 0),
+        });
+        ToggleButton borderBtn = null!, shadowBtn = null!, tornBtn = null!;
+        borderBtn = MakeFxButton("🔳", "Black border on the saved image", fxBorder,
+            v => fxBorder = v);
+        shadowBtn = MakeFxButton("🌫", "Soft drop shadow (Greenshot-style) on the saved image", fxShadow,
+            v => fxShadow = v);
+        tornBtn = MakeFxButton("✂", "Torn paper edges all around — reveals the shadow beneath (turns shadow on)", fxTorn,
+            v =>
+            {
+                fxTorn = v;
+                // Torn reveals the shadow, so it needs shadow on.
+                if (v && !fxShadow) { fxShadow = true; shadowBtn.IsChecked = true; }
+            });
+        toolbar.Children.Add(borderBtn);
+        toolbar.Children.Add(shadowBtn);
+        toolbar.Children.Add(tornBtn);
+
         toolbar.Children.Add(new TextBlock
         {
             Text = "Ctrl+V pastes an image • text: Enter = new line, Ctrl+Enter = done",
@@ -437,11 +493,69 @@ public static class ImageAnnotator
         };
         applyViewScale(outputScale);   // honor a non-1.0 default
 
+        // Effect preview: the surface sits on a white "paper" backing so
+        // the shadow/torn preview matches the white-composited output.
+        // The backing + padding only appear when an effect is on, so a
+        // plain edit shows no extra chrome. Decorations are purely visual
+        // (Effect / Clip / a border rectangle) and don't touch the
+        // surface's internal coordinates, so drawing stays pixel-accurate.
+        var paperBacking = new System.Windows.Controls.Border
+        {
+            Background = Brushes.White,
+            Visibility = Visibility.Collapsed,
+        };
+        var borderRect = new Rectangle
+        {
+            Stroke = Brushes.Black,
+            StrokeThickness = 3,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        var effectHost = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        effectHost.Children.Add(paperBacking);
+        effectHost.Children.Add(surface);
+        effectHost.Children.Add(borderRect);
+
+        refreshEffectPreview = () =>
+        {
+            bool anyFx = fxBorder || fxShadow || fxTorn;
+            // White paper shows behind whenever any effect is on, with a
+            // margin so the shadow/tears have room to render.
+            paperBacking.Visibility = anyFx ? Visibility.Visible : Visibility.Collapsed;
+            int pad = fxShadow ? 16 : (anyFx ? 6 : 0);
+            surface.Margin = new Thickness(pad);
+            paperBacking.Margin = new Thickness(0);
+
+            // Shadow → soft DropShadowEffect on the surface (casts onto
+            // the white paper, like the baked output).
+            surface.Effect = fxShadow
+                ? new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 18,
+                    ShadowDepth = 4,
+                    Direction = 315,   // down-right
+                    Opacity = 0.42,
+                }
+                : null;
+
+            // Border → black rectangle stroke framing the surface.
+            borderRect.Visibility = fxBorder ? Visibility.Visible : Visibility.Collapsed;
+            borderRect.Margin = new Thickness(pad);
+
+            // Torn → ragged clip on the surface (revealing the white paper
+            // + shadow behind). Regenerated for the current size.
+            surface.Clip = fxTorn
+                ? BuildTornClip(source.PixelWidth, source.PixelHeight)
+                : null;
+        };
+        refreshEffectPreview();   // reflect the initial (settings-derived) state
+
         var scroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = surface,
+            Content = effectHost,
             Margin = new Thickness(10, 0, 10, 0),
         };
         Grid.SetRow(scroller, 1);
@@ -1343,7 +1457,14 @@ public static class ImageAnnotator
             // resized image even with zero annotations.
             bool scaled = Math.Abs(outputScale - 1.0) > 0.001;
             if (undoStack.Count == 0 && !scaled) return null;
-            return Flatten(source, surface, outputScale);
+            var flat = Flatten(source, surface, outputScale);
+            if (flat is null) return null;
+            // Bake in the presentation effects (torn → border → shadow) so
+            // the sent/saved image carries them. Same pipeline the capture
+            // watcher uses, so results are identical.
+            if (fxTorn || fxBorder || fxShadow)
+                flat = Services.ClipboardWatcher.ApplyEffects(flat, tornAll: fxTorn, border: fxBorder, shadow: fxShadow);
+            return flat;
         }
 
         saveBtn.Click += (_, _) =>
@@ -1397,6 +1518,41 @@ public static class ImageAnnotator
     /// caps the radius at a fraction of the shorter side so there's
     /// always a visible straight edge, while large boxes still get the
     /// full "nice" radius. Also floored at 0 for degenerate sizes.</summary>
+    /// <summary>A ragged rectangular clip geometry for the torn-edge
+    /// PREVIEW — a deterministic jagged outline matching the look the
+    /// baked ApplyTornEdges produces (all four sides). Not pixel-identical
+    /// to the bake, but a faithful preview of "torn all around".</summary>
+    private static Geometry BuildTornClip(int w, int h)
+    {
+        int depthH = Math.Clamp((int)(h * 0.06), 8, 40);
+        int depthV = Math.Clamp((int)(w * 0.06), 8, 40);
+        var rng = new Random(w * 73856093 ^ h * 19349663);
+        var pts = new List<Point>();
+        // Walk the perimeter, jittering inward by a random depth every
+        // ~12px so the outline looks torn. Clockwise from top-left.
+        void EdgeH(int x0, int x1, int y, int depth, int dir)
+        {
+            for (int x = x0; dir > 0 ? x <= x1 : x >= x1; x += dir * 12)
+                pts.Add(new Point(x, y + dir * 0 + (rng.Next(depth + 1)) * (y == 0 ? 1 : -1)));
+        }
+        void EdgeV(int y0, int y1, int x, int depth, int dir)
+        {
+            for (int y = y0; dir > 0 ? y <= y1 : y >= y1; y += dir * 12)
+                pts.Add(new Point(x + (rng.Next(depth + 1)) * (x == 0 ? 1 : -1), y));
+        }
+        EdgeH(0, w, 0, depthH, +1);       // top L→R
+        EdgeV(0, h, w, depthV, +1);       // right T→B
+        EdgeH(w, 0, h, depthH, -1);       // bottom R→L
+        EdgeV(h, 0, 0, depthV, -1);       // left B→T
+        if (pts.Count < 3) return new RectangleGeometry(new Rect(0, 0, w, h));
+        var fig = new PathFigure { StartPoint = pts[0], IsClosed = true, IsFilled = true };
+        for (int i = 1; i < pts.Count; i++) fig.Segments.Add(new LineSegment(pts[i], false));
+        var geo = new PathGeometry();
+        geo.Figures.Add(fig);
+        geo.Freeze();
+        return geo;
+    }
+
     private static double RoundedCornerRadius(double width, double height, double desired)
     {
         double shorter = Math.Min(Math.Abs(width), Math.Abs(height));

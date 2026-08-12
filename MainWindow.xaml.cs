@@ -1766,9 +1766,27 @@ public partial class MainWindow : Window
     /// effects bake in, it lands in the top slot, auto-save fires if
     /// enabled. Single ingestion path = consistent behavior.</summary>
     private void PublishCapture(System.Windows.Media.Imaging.BitmapSource shot)
+        => PublishCapture(shot, effectsAlreadyBaked: false);
+
+    /// <summary>Put a captured shot on the clipboard. Effects (border/
+    /// shadow/torn) are baked HERE from global settings unless the caller
+    /// already baked them (the annotator does, per its own toggles). Then
+    /// we suppress the watcher so it doesn't apply the global effects a
+    /// SECOND time to the image we just published.</summary>
+    private void PublishCapture(System.Windows.Media.Imaging.BitmapSource shot, bool effectsAlreadyBaked)
     {
         try
         {
+            if (!effectsAlreadyBaked)
+            {
+                bool torn = _vm.Settings.AddTornTopEdge || _vm.Settings.AddTornBottomEdge ||
+                            _vm.Settings.AddTornLeftEdge || _vm.Settings.AddTornRightEdge;
+                if (torn || _vm.Settings.AddBorderToImages || _vm.Settings.AddDropShadowToImages)
+                    shot = Services.ClipboardWatcher.ApplyEffects(shot,
+                        tornAll: torn, border: _vm.Settings.AddBorderToImages, shadow: _vm.Settings.AddDropShadowToImages);
+            }
+            // Don't let the watcher re-apply effects to our own publish.
+            _clipWatcher.SuppressFor(1500);
             System.Windows.Clipboard.SetImage(shot);
             _vm.StatusText = $"📷 Captured {shot.PixelWidth}×{shot.PixelHeight}";
             Services.Trace.Log("capture", $"published {shot.PixelWidth}x{shot.PixelHeight} to clipboard");

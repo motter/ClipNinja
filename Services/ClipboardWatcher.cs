@@ -834,6 +834,25 @@ public class ClipboardWatcher : IDisposable
     /// Greenshot. `blurPx` is the softness radius; `offsetPx` nudges the
     /// shadow down-right so the light reads as coming from top-left.
     /// </summary>
+    /// <summary>Apply the presentation effects (torn edges → border →
+    /// drop shadow) to an image in the correct order. Shared by the
+    /// clipboard watcher (global-setting captures) and the annotator
+    /// (per-image toggles) so both produce identical results. Torn runs
+    /// first so the shadow casts from the ragged silhouette; shadow
+    /// composites everything onto opaque white so it survives the
+    /// clipboard.</summary>
+    public static BitmapSource ApplyEffects(BitmapSource bmp,
+        bool tornAll, bool border, bool shadow)
+    {
+        if (tornAll)
+            bmp = ApplyTornEdges(bmp, true, true, true, true);
+        if (border)
+            bmp = AddBlackBorder(bmp, borderPx: 3);
+        if (shadow)
+            bmp = AddDropShadow(bmp, offsetPx: 4, blurPx: 12);
+        return bmp;
+    }
+
     public static BitmapSource AddDropShadow(BitmapSource src, int offsetPx, int blurPx)
     {
         if (src.PixelWidth == 0 || src.PixelHeight == 0 || blurPx <= 0) return src;
@@ -842,13 +861,11 @@ public class ClipboardWatcher : IDisposable
             int srcW = src.PixelWidth;
             int srcH = src.PixelHeight;
 
-            // Uniform margin on every side so the shadow can extend all
-            // the way around. Extra room on the down-right for the offset.
+            // Uniform margin on every side, with extra room down-right for
+            // the offset so the shadow can extend all the way around.
             int margin = blurPx + 2;
-            int padLeft = margin;
-            int padTop = margin;
-            int padRight = margin + offsetPx;
-            int padBottom = margin + offsetPx;
+            int padLeft = margin, padTop = margin;
+            int padRight = margin + offsetPx, padBottom = margin + offsetPx;
             int outerW = srcW + padLeft + padRight;
             int outerH = srcH + padTop + padBottom;
 
@@ -859,77 +876,79 @@ public class ClipboardWatcher : IDisposable
             var srcPixels = new byte[srcStride * srcH];
             bgra.CopyPixels(srcPixels, srcStride, 0);
 
+            // Silhouette-based shadow so it works for BOTH a plain
+            // rectangle AND a torn (ragged-alpha) image: we take the
+            // source's alpha as a mask, blur it, and paint that blurred
+            // mask as gray onto white. Where the image is torn away near
+            // an edge, the blurred shadow shows through — "tears reveal
+            // the shadow beneath". Everything is composited onto OPAQUE
+            // WHITE so the Windows clipboard (which drops alpha) can't
+            // turn it black.
+
+            // 1. Build the shadow mask at output size: source alpha placed
+            //    at the shadow position (image pos shifted by offset).
+            var mask = new float[outerW * outerH];
+            int shX = padLeft + offsetPx, shY = padTop + offsetPx;
+            for (int y = 0; y < srcH; y++)
+            {
+                int sRow = y * srcStride;
+                int mRow = (y + shY) * outerW + shX;
+                for (int x = 0; x < srcW; x++)
+                    mask[mRow + x] = srcPixels[sRow + x * 4 + 3] / 255f;
+            }
+
+            // 2. Separable box blur (3 passes ≈ gaussian) of the mask.
+            int radius = Math.Max(1, blurPx / 2);
+            var tmp = new float[outerW * outerH];
+            for (int pass = 0; pass < 3; pass++)
+            {
+                BoxBlurH(mask, tmp, outerW, outerH, radius);
+                BoxBlurV(tmp, mask, outerW, outerH, radius);
+            }
+
+            // 3. White canvas, darkened toward black by the blurred mask.
             int outStride = outerW * 4;
-            var outPixels = new byte[outStride * outerH]; // transparent
-
-            // Shadow rectangle = image bounds shifted down-right by offset.
-            // Alpha falls off smoothly outside that rect over blurPx using
-            // a smoothstep curve (softer, more natural than linear), giving
-            // the rounded, feathered edges Greenshot has on all four sides.
-            const int peakAlpha = 110;
-            int shLeft = padLeft + offsetPx;
-            int shTop = padTop + offsetPx;
-            int shRight = shLeft + srcW;   // exclusive
-            int shBottom = shTop + srcH;   // exclusive
-
-            static double Smooth(double t)   // smoothstep 0..1
-            {
-                if (t <= 0) return 0;
-                if (t >= 1) return 1;
-                return t * t * (3 - 2 * t);
-            }
-
-            // Fill the whole canvas with OPAQUE WHITE first. The shadow is
-            // then composited on top as gray. This is the key fix: the
-            // Windows clipboard's bitmap format drops the alpha channel,
-            // so a transparent shadow margin collapses to solid BLACK when
-            // pasted. By baking everything onto an opaque background there
-            // is no alpha to lose — the shadow survives as a soft gray,
-            // exactly how Greenshot looks pasted into a document.
-            for (int i = 0; i < outPixels.Length; i += 4)
-            {
-                outPixels[i + 0] = 255; // B
-                outPixels[i + 1] = 255; // G
-                outPixels[i + 2] = 255; // R
-                outPixels[i + 3] = 255; // A (opaque)
-            }
-
+            var outPixels = new byte[outStride * outerH];
+            const double peak = 0.42;   // max shadow darkness (0..1)
             for (int y = 0; y < outerH; y++)
             {
-                int rowBase = y * outStride;
-                double vF;
-                if (y >= shTop && y < shBottom) vF = 1.0;
-                else if (y < shTop) vF = Smooth(1.0 - (double)(shTop - y) / blurPx);
-                else vF = Smooth(1.0 - (double)(y - shBottom + 1) / blurPx);
-                if (vF <= 0) continue;
-
+                int oRow = y * outStride;
+                int mRow = y * outerW;
                 for (int x = 0; x < outerW; x++)
                 {
-                    double hF;
-                    if (x >= shLeft && x < shRight) hF = 1.0;
-                    else if (x < shLeft) hF = Smooth(1.0 - (double)(shLeft - x) / blurPx);
-                    else hF = Smooth(1.0 - (double)(x - shRight + 1) / blurPx);
-                    if (hF <= 0) continue;
-
-                    // Darken white toward black by the shadow strength —
-                    // i.e. composite black at alpha `t` over the white bg.
-                    double t = (peakAlpha / 255.0) * vF * hF;
-                    if (t <= 0) continue;
+                    double t = mask[mRow + x] * peak;
                     byte v = (byte)Math.Round(255 * (1 - t));
-                    int p = rowBase + x * 4;
+                    int p = oRow + x * 4;
                     outPixels[p + 0] = v;
                     outPixels[p + 1] = v;
                     outPixels[p + 2] = v;
-                    // alpha stays 255 (opaque)
+                    outPixels[p + 3] = 255;   // opaque
                 }
             }
 
-            // Blit the image on top, at its padded position (opaque).
+            // 4. Composite the source over the shadowed white using the
+            //    source's own alpha, so torn areas keep the shadow behind.
             for (int y = 0; y < srcH; y++)
             {
-                int srcRow = y * srcStride;
-                int dstRow = (y + padTop) * outStride + padLeft * 4;
-                System.Buffer.BlockCopy(srcPixels, srcRow, outPixels, dstRow, srcStride);
+                int sRow = y * srcStride;
+                int oRow = (y + padTop) * outStride + padLeft * 4;
+                for (int x = 0; x < srcW; x++)
+                {
+                    int sp = sRow + x * 4;
+                    int op = oRow + x * 4;
+                    double a = srcPixels[sp + 3] / 255.0;
+                    if (a <= 0) continue;            // fully torn — keep shadow
+                    if (a >= 1)
+                    {
+                        outPixels[op + 0] = srcPixels[sp + 0];
+                        outPixels[op + 1] = srcPixels[sp + 1];
+                        outPixels[op + 2] = srcPixels[sp + 2];
+                        continue;
+                    }
+                    // Partial edge alpha — blend over the backing.
+                    for (int c = 0; c < 3; c++)
+                        outPixels[op + c] = (byte)Math.Round(srcPixels[sp + c] * a + outPixels[op + c] * (1 - a));
+                }
             }
 
             var wb = new WriteableBitmap(outerW, outerH, 96, 96,
@@ -940,6 +959,41 @@ public class ClipboardWatcher : IDisposable
             return wb;
         }
         catch { return src; }
+    }
+
+    // Separable box blur helpers for the shadow mask (float alpha 0..1).
+    private static void BoxBlurH(float[] src, float[] dst, int w, int h, int r)
+    {
+        double norm = 1.0 / (2 * r + 1);
+        for (int y = 0; y < h; y++)
+        {
+            int row = y * w;
+            double acc = 0;
+            for (int x = -r; x <= r; x++) acc += src[row + Math.Clamp(x, 0, w - 1)];
+            for (int x = 0; x < w; x++)
+            {
+                dst[row + x] = (float)(acc * norm);
+                int add = Math.Clamp(x + r + 1, 0, w - 1);
+                int sub = Math.Clamp(x - r, 0, w - 1);
+                acc += src[row + add] - src[row + sub];
+            }
+        }
+    }
+    private static void BoxBlurV(float[] src, float[] dst, int w, int h, int r)
+    {
+        double norm = 1.0 / (2 * r + 1);
+        for (int x = 0; x < w; x++)
+        {
+            double acc = 0;
+            for (int y = -r; y <= r; y++) acc += src[Math.Clamp(y, 0, h - 1) * w + x];
+            for (int y = 0; y < h; y++)
+            {
+                dst[y * w + x] = (float)(acc * norm);
+                int add = Math.Clamp(y + r + 1, 0, h - 1);
+                int sub = Math.Clamp(y - r, 0, h - 1);
+                acc += src[add * w + x] - src[sub * w + x];
+            }
+        }
     }
 
     /// <summary>

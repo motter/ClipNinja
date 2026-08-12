@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.14.0] — 2026-07-16
+
+### Added — presentation effects live in the annotator now
+Three toggle buttons in the annotator toolbar (under "FX:") let you add
+or remove effects per image, with a live preview on the canvas:
+- **🔳 Border** — black frame
+- **🌫 Shadow** — soft Greenshot-style drop shadow on white
+- **✂ Torn edges** — ragged torn-paper edge all the way around
+
+They start from your global capture settings (so the app-wide "Polished
+look" carries over) but you can override per image. Whatever's toggled
+bakes into the saved/sent image.
+
+### Changed — torn edges go all the way around and reveal the shadow
+Torn edges now tear all four sides (the corners connect raggedly)
+instead of just top/bottom straight edges. The drop shadow is rebuilt
+to cast from the image's actual silhouette, so a torn image shows the
+soft shadow through its ragged edges — the classic "torn paper lifted
+off the page" look. Enabling Torn turns Shadow on automatically, since
+the tear reveals the shadow beneath. Everything still bakes onto opaque
+white so it survives the clipboard.
+
+### Fixed — effects no longer double-apply
+Captures published from ClipNinja now bake effects exactly once and
+suppress the clipboard watcher from re-applying them.
+
 ## [2.13.3] — 2026-07-16
 
 ### Fixed — drop shadow showed as a solid black border
