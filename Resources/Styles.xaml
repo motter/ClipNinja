@@ -2,6 +2,41 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- Header title text -->
+    <!-- Compact pill toggle for the header effect switches. Dim when off,
+         accent-filled when on, so state is obvious at a glance. -->
+    <Style x:Key="FxToggleStyle" TargetType="ToggleButton">
+        <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Margin" Value="0,0,5,0" />
+        <Setter Property="Padding" Value="7,2,7,2" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Pill"
+                            Background="#22FFFFFF"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="#33FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{StaticResource AccentBrush}" />
+                            <Setter TargetName="Pill" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter Property="Foreground" Value="#201B14" />
+                            <Setter Property="FontWeight" Value="Bold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="HeaderTextStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Consolas" />
         <Setter Property="FontSize" Value="14" />

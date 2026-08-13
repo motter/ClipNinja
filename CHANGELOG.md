@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.15.0] — 2026-07-16
+
+### Added — quick effect toggles in the header
+The main window header has a second row with three one-click toggles
+for the effects applied to new captures: **🌫 Shadow**, **🔳 Border**,
+and **✂ Torn**. Each lights up when on, sets the global default (the
+same settings as the Settings dialog and the annotator's per-image
+toggles), and takes effect on your next capture — no need to open
+Settings. The old single 🖼 border button in the top row is replaced
+by these. The header is a touch taller to fit the row.
+
 ## [2.14.2] — 2026-07-16
 
 ### Fixed — captures stopped landing in the tray list

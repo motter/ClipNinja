@@ -525,7 +525,7 @@
                 BorderThickness="1">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="48" />     <!-- Header bar -->
+                    <RowDefinition Height="78" />     <!-- Header bar (2 rows) -->
                     <RowDefinition Height="160" />    <!-- Ninja stage -->
                     <RowDefinition Height="*" />      <!-- Slot list -->
                     <RowDefinition Height="Auto" />   <!-- Footer -->
@@ -536,6 +536,7 @@
                         Background="{StaticResource PanelBrush}"
                         MouseLeftButtonDown="OnHeader_DragStart"
                         CornerRadius="14,14,0,0">
+                    <StackPanel Orientation="Vertical">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />     <!-- title (left) -->
@@ -551,7 +552,7 @@
                                    Style="{StaticResource HeaderTextStyle}"
                                    Margin="14,0,0,0">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text="  v2.14.2"
+                            <Run Text="  v2.15.0"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
@@ -587,16 +588,6 @@
                                     Content="⚙"
                                     Click="OnSettingsButton_Click"
                                     ToolTip="Settings" />
-                            <!-- Border-on-screenshots quick toggle. Shows
-                                 filled/outlined frame glyph by state. Only
-                                 affects FUTURE captures — the tooltip says
-                                 so because that's a common mental-model
-                                 mismatch. -->
-                            <Button x:Name="BorderToggleButton"
-                                    Style="{StaticResource WinChromeButtonStyle}"
-                                    Content="🖼"
-                                    Click="OnBorderToggle_Click"
-                                    ToolTip="Black border on new screenshots: ON (click to turn off)" />
                             <!-- Divider between app actions and window controls -->
                             <Border Width="1" Height="20"
                                     Background="{StaticResource BorderBrush}"
@@ -614,6 +605,33 @@
                                     ToolTip="Close to tray" />
                         </StackPanel>
                     </Grid>
+
+                    <!-- Second header row: quick effect toggles that set the
+                         GLOBAL defaults for new captures (same settings as
+                         the Settings dialog). Each is a ToggleButton whose
+                         checked state shows on/off; handlers keep the
+                         watcher + persistence in sync. -->
+                    <StackPanel Orientation="Horizontal"
+                                Margin="14,0,0,6">
+                        <TextBlock Text="Effects on new captures:"
+                                   FontSize="10"
+                                   Foreground="{StaticResource SubTextBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <ToggleButton x:Name="ShadowToggle"
+                                      Style="{StaticResource FxToggleStyle}"
+                                      Click="OnShadowToggle_Click"
+                                      ToolTip="Soft drop shadow on new screenshots">🌫 Shadow</ToggleButton>
+                        <ToggleButton x:Name="BorderToggleButton"
+                                      Style="{StaticResource FxToggleStyle}"
+                                      Click="OnBorderToggle_Click"
+                                      ToolTip="Black border on new screenshots">🔳 Border</ToggleButton>
+                        <ToggleButton x:Name="TornToggle"
+                                      Style="{StaticResource FxToggleStyle}"
+                                      Click="OnTornToggle_Click"
+                                      ToolTip="Torn paper edges on new screenshots">✂ Torn</ToggleButton>
+                    </StackPanel>
+                    </StackPanel>
                 </Border>
 
                 <!-- ── Ninja stage: desert scene with chibi ninja ── -->

@@ -105,6 +105,7 @@ public partial class MainWindow : Window
         _clipWatcher.AddTornLeftEdge = _vm.Settings.AddTornLeftEdge;
         _clipWatcher.AddTornRightEdge = _vm.Settings.AddTornRightEdge;
         UpdateBorderToggleVisual();
+        RefreshEffectToggles();
 
         // If the user has auto-start enabled in settings, make sure the
         // registry entry exists and points at the current .exe path. This
@@ -1485,13 +1486,55 @@ public partial class MainWindow : Window
     {
         try
         {
-            bool on = _vm.Settings.AddBorderToImages;
-            BorderToggleButton.Opacity = on ? 1.0 : 0.35;
-            BorderToggleButton.ToolTip = on
-                ? "Black border on new screenshots: ON (click to turn off)"
-                : "Black border on new screenshots: OFF (click to turn on)";
+            BorderToggleButton.IsChecked = _vm.Settings.AddBorderToImages;
         }
         catch { /* button may not exist yet during XAML parse */ }
+    }
+
+    private void OnShadowToggle_Click(object sender, RoutedEventArgs e)
+    {
+        bool want = !_vm.Settings.AddDropShadowToImages;
+        _vm.Settings.AddDropShadowToImages = want;
+        _clipWatcher.AddDropShadowToImages = want;
+        ShadowToggle.IsChecked = want;
+        _vm.ScheduleSave();
+        _vm.StatusText = want
+            ? "✓ New screenshots will get a soft drop shadow"
+            : "Drop shadow off for new screenshots";
+    }
+
+    private void OnTornToggle_Click(object sender, RoutedEventArgs e)
+    {
+        bool want = !(_vm.Settings.AddTornTopEdge || _vm.Settings.AddTornBottomEdge ||
+                      _vm.Settings.AddTornLeftEdge || _vm.Settings.AddTornRightEdge);
+        _vm.Settings.AddTornTopEdge = want;
+        _vm.Settings.AddTornBottomEdge = want;
+        _vm.Settings.AddTornLeftEdge = want;
+        _vm.Settings.AddTornRightEdge = want;
+        _clipWatcher.AddTornTopEdge = want;
+        _clipWatcher.AddTornBottomEdge = want;
+        _clipWatcher.AddTornLeftEdge = want;
+        _clipWatcher.AddTornRightEdge = want;
+        TornToggle.IsChecked = want;
+        _vm.ScheduleSave();
+        _vm.StatusText = want
+            ? "✓ New screenshots will get torn paper edges"
+            : "Torn edges off for new screenshots";
+    }
+
+    /// <summary>Sync all three header effect toggles to the current
+    /// settings. Called once after load so they reflect the persisted
+    /// state, and after the settings dialog changes them.</summary>
+    private void RefreshEffectToggles()
+    {
+        try
+        {
+            ShadowToggle.IsChecked = _vm.Settings.AddDropShadowToImages;
+            BorderToggleButton.IsChecked = _vm.Settings.AddBorderToImages;
+            TornToggle.IsChecked = _vm.Settings.AddTornTopEdge || _vm.Settings.AddTornBottomEdge ||
+                                   _vm.Settings.AddTornLeftEdge || _vm.Settings.AddTornRightEdge;
+        }
+        catch { /* controls may not exist yet during XAML parse */ }
     }
 
     private void OnTraySettings_Click(object sender, RoutedEventArgs e)
@@ -1837,8 +1880,9 @@ public partial class MainWindow : Window
                 : "Black border on screenshots: OFF";
         }
         catch { }
-        // Keep the header toggle button visual in sync too.
+        // Keep the header effect toggles in sync too.
         UpdateBorderToggleVisual();
+        RefreshEffectToggles();
         // Capture hotkeys may have changed — re-register from settings.
         RegisterCaptureHotkeys();
         _vm.ScheduleSave();
