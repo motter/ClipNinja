@@ -181,31 +181,13 @@ public class ClipboardWatcher : IDisposable
                     // left), then drop shadow (surrounds the framed result).
                     // Any effect at all triggers the "replace-live-clipboard"
                     // flow so hot-key paste gets the effect-baked version.
-                    if (AddTornTopEdge || AddTornBottomEdge || AddTornLeftEdge || AddTornRightEdge)
+                    bool tornAny = AddTornTopEdge || AddTornBottomEdge || AddTornLeftEdge || AddTornRightEdge;
+                    if (tornAny || AddBorderToImages || AddDropShadowToImages)
                     {
-                        using (Trace.Time("watcher", "ApplyTornEdges"))
+                        using (Trace.Time("watcher", "ApplyEffects"))
                         {
-                            bmp = ApplyTornEdges(bmp, AddTornTopEdge, AddTornBottomEdge,
-                                AddTornLeftEdge, AddTornRightEdge);
-                            wasModified = true;
-                        }
-                    }
-                    if (AddBorderToImages)
-                    {
-                        using (Trace.Time("watcher", "AddBlackBorder"))
-                        {
-                            bmp = AddBlackBorder(bmp, borderPx: 3);
-                            wasModified = true;
-                        }
-                    }
-                    if (AddDropShadowToImages)
-                    {
-                        using (Trace.Time("watcher", "AddDropShadow"))
-                        {
-                            // Softer, larger radius with a gentle offset —
-                            // the clean Greenshot-style shadow that wraps
-                            // all four sides.
-                            bmp = AddDropShadow(bmp, offsetPx: 4, blurPx: 12);
+                            bmp = ApplyEffects(bmp, tornAll: tornAny,
+                                border: AddBorderToImages, shadow: AddDropShadowToImages);
                             wasModified = true;
                         }
                     }
@@ -849,8 +831,52 @@ public class ClipboardWatcher : IDisposable
         if (border)
             bmp = AddBlackBorder(bmp, borderPx: 3);
         if (shadow)
+        {
+            // Composites onto opaque white and (if torn) reveals the
+            // shadow through the ragged edges.
             bmp = AddDropShadow(bmp, offsetPx: 4, blurPx: 12);
+        }
+        else if (tornAll)
+        {
+            // Torn WITHOUT shadow still leaves transparent ragged edges,
+            // which the clipboard would blacken. Flatten onto white so
+            // the tears become white and survive paste.
+            bmp = FlattenOntoWhite(bmp);
+        }
         return bmp;
+    }
+
+    /// <summary>Composite an image (which may have alpha, e.g. torn
+    /// edges) onto an opaque white background at the same size. Used so a
+    /// torn image with no drop shadow doesn't paste with black edges
+    /// (the clipboard drops the alpha channel).</summary>
+    public static BitmapSource FlattenOntoWhite(BitmapSource src)
+    {
+        if (src.PixelWidth == 0 || src.PixelHeight == 0) return src;
+        try
+        {
+            int w = src.PixelWidth, h = src.PixelHeight;
+            var bgra = src.Format == System.Windows.Media.PixelFormats.Bgra32
+                ? src
+                : new FormatConvertedBitmap(src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+            int stride = w * 4;
+            var px = new byte[stride * h];
+            bgra.CopyPixels(px, stride, 0);
+            for (int i = 0; i < px.Length; i += 4)
+            {
+                double a = px[i + 3] / 255.0;
+                if (a >= 1) { px[i + 3] = 255; continue; }
+                px[i + 0] = (byte)Math.Round(px[i + 0] * a + 255 * (1 - a));
+                px[i + 1] = (byte)Math.Round(px[i + 1] * a + 255 * (1 - a));
+                px[i + 2] = (byte)Math.Round(px[i + 2] * a + 255 * (1 - a));
+                px[i + 3] = 255;
+            }
+            var wb = new WriteableBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+            wb.WritePixels(new System.Windows.Int32Rect(0, 0, w, h), px, stride, 0);
+            wb.Freeze();
+            return wb;
+        }
+        catch { return src; }
     }
 
     public static BitmapSource AddDropShadow(BitmapSource src, int offsetPx, int blurPx)

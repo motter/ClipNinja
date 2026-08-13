@@ -420,13 +420,8 @@ public static class ImageAnnotator
             v => fxBorder = v);
         shadowBtn = MakeFxButton("🌫", "Soft drop shadow (Greenshot-style) on the saved image", fxShadow,
             v => fxShadow = v);
-        tornBtn = MakeFxButton("✂", "Torn paper edges all around — reveals the shadow beneath (turns shadow on)", fxTorn,
-            v =>
-            {
-                fxTorn = v;
-                // Torn reveals the shadow, so it needs shadow on.
-                if (v && !fxShadow) { fxShadow = true; shadowBtn.IsChecked = true; }
-            });
+        tornBtn = MakeFxButton("✂", "Torn paper edges all around the saved image", fxTorn,
+            v => fxTorn = v);
         toolbar.Children.Add(borderBtn);
         toolbar.Children.Add(shadowBtn);
         toolbar.Children.Add(tornBtn);

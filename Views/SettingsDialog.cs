@@ -102,22 +102,36 @@ public static class SettingsDialog
         // they rely on transparency, which the Windows clipboard discards,
         // so they'd paste as black or vanish on white. Shadow-on-white
         // survives paste everywhere.
-        var polishedCheck = MakeCheck("Polished look on captured images (soft drop shadow)",
+        // Drop shadow and torn edges are INDEPENDENT toggles — either,
+        // both, or neither. (They can also be toggled per-image in the
+        // annotator; these are the defaults for new captures.)
+        var shadowCheck = MakeCheck("Add soft drop shadow to captured images",
             "Bake a soft Greenshot-style drop shadow around new screenshots so they lift off the page when pasted into a document. Applies to NEW captures only.",
             settings.AddDropShadowToImages, fg, subFg);
-        polishedCheck.Click += (_, _) =>
+        shadowCheck.Click += (_, _) =>
         {
-            bool on = polishedCheck.IsChecked == true;
-            settings.AddDropShadowToImages = on;
-            // Torn edges are no longer part of the polished look — force
-            // them off so an old saved setting can't resurrect them.
-            settings.AddTornTopEdge = false;
-            settings.AddTornBottomEdge = false;
-            settings.AddTornLeftEdge = false;
-            settings.AddTornRightEdge = false;
+            settings.AddDropShadowToImages = shadowCheck.IsChecked == true;
             onSettingsChanged();
         };
-        root.Children.Add(polishedCheck);
+        root.Children.Add(shadowCheck);
+
+        // Torn edges are stored as four per-side flags; the UI treats
+        // them as one "all around" toggle (which is how they're applied).
+        bool tornInitial = settings.AddTornTopEdge || settings.AddTornBottomEdge ||
+                           settings.AddTornLeftEdge || settings.AddTornRightEdge;
+        var tornCheck = MakeCheck("Add torn paper edges to captured images",
+            "Bake a ragged torn-paper edge all the way around new screenshots. Works with or without the drop shadow. Applies to NEW captures only.",
+            tornInitial, fg, subFg);
+        tornCheck.Click += (_, _) =>
+        {
+            bool on = tornCheck.IsChecked == true;
+            settings.AddTornTopEdge = on;
+            settings.AddTornBottomEdge = on;
+            settings.AddTornLeftEdge = on;
+            settings.AddTornRightEdge = on;
+            onSettingsChanged();
+        };
+        root.Children.Add(tornCheck);
 
         // ── Quick-save section ───────────────────────────────────────
         root.Children.Add(SectionHeader("Quick-save screenshots", accent));

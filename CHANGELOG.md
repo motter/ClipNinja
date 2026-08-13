@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.14.1] — 2026-07-16
+
+### Changed — drop shadow and torn edges are now fully independent
+The two effects are separate everywhere — either, both, or neither:
+- **Annotator:** the ✂ Torn and 🌫 Shadow toggles no longer force each
+  other; toggle each on its own.
+- **Settings:** the single "Polished look" toggle is split into two —
+  "Add soft drop shadow" and "Add torn paper edges" — each independent.
+
+Torn edges applied without the drop shadow are now flattened onto white
+so the ragged edges don't paste as black (the clipboard drops
+transparency). With the shadow on, the tears still reveal the shadow
+beneath as before.
+
 ## [2.14.0] — 2026-07-16
 
 ### Added — presentation effects live in the annotator now
