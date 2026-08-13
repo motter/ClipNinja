@@ -43,6 +43,13 @@ public class ClipboardWatcher : IDisposable
     /// </summary>
     public DateTime SuppressUntil { get; set; } = DateTime.MinValue;
 
+    /// <summary>One-shot: when set, the NEXT observed image is added to
+    /// the list WITHOUT applying the global effect settings (because the
+    /// caller — the annotator — already baked its own per-image effects).
+    /// Reset automatically after that image. Unlike SuppressUntil, this
+    /// does NOT stop the image from being captured into the list.</summary>
+    public bool SkipEffectsOnce { get; set; }
+
     /// <summary>Helper to set suppression for a fixed window.</summary>
     public void SuppressFor(int milliseconds)
     {
@@ -181,8 +188,13 @@ public class ClipboardWatcher : IDisposable
                     // left), then drop shadow (surrounds the framed result).
                     // Any effect at all triggers the "replace-live-clipboard"
                     // flow so hot-key paste gets the effect-baked version.
+                    // SkipEffectsOnce (set when the annotator already baked
+                    // its own effects) makes us add the image to the list
+                    // WITHOUT re-applying — but only for this one image.
+                    bool skipFx = SkipEffectsOnce;
+                    SkipEffectsOnce = false;
                     bool tornAny = AddTornTopEdge || AddTornBottomEdge || AddTornLeftEdge || AddTornRightEdge;
-                    if (tornAny || AddBorderToImages || AddDropShadowToImages)
+                    if (!skipFx && (tornAny || AddBorderToImages || AddDropShadowToImages))
                     {
                         using (Trace.Time("watcher", "ApplyEffects"))
                         {

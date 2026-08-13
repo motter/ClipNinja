@@ -1768,28 +1768,22 @@ public partial class MainWindow : Window
     private void PublishCapture(System.Windows.Media.Imaging.BitmapSource shot)
         => PublishCapture(shot, effectsAlreadyBaked: false);
 
-    /// <summary>Put a captured shot on the clipboard. Effects (border/
-    /// shadow/torn) are baked HERE from global settings unless the caller
-    /// already baked them (the annotator does, per its own toggles). Then
-    /// we suppress the watcher so it doesn't apply the global effects a
-    /// SECOND time to the image we just published.</summary>
+    /// <summary>Put a captured shot on the clipboard. The clipboard
+    /// WATCHER is what adds it to the tray list (and applies the global
+    /// effect settings), so we must NOT suppress the watcher here — doing
+    /// that was the bug where captures stopped landing in the list. If
+    /// the annotator already baked its per-image effects, we set the
+    /// watcher's one-shot SkipEffectsOnce so it still adds the image to
+    /// the list but doesn't apply the global effects a second time.</summary>
     private void PublishCapture(System.Windows.Media.Imaging.BitmapSource shot, bool effectsAlreadyBaked)
     {
         try
         {
-            if (!effectsAlreadyBaked)
-            {
-                bool torn = _vm.Settings.AddTornTopEdge || _vm.Settings.AddTornBottomEdge ||
-                            _vm.Settings.AddTornLeftEdge || _vm.Settings.AddTornRightEdge;
-                if (torn || _vm.Settings.AddBorderToImages || _vm.Settings.AddDropShadowToImages)
-                    shot = Services.ClipboardWatcher.ApplyEffects(shot,
-                        tornAll: torn, border: _vm.Settings.AddBorderToImages, shadow: _vm.Settings.AddDropShadowToImages);
-            }
-            // Don't let the watcher re-apply effects to our own publish.
-            _clipWatcher.SuppressFor(1500);
+            if (effectsAlreadyBaked)
+                _clipWatcher.SkipEffectsOnce = true;
             System.Windows.Clipboard.SetImage(shot);
             _vm.StatusText = $"📷 Captured {shot.PixelWidth}×{shot.PixelHeight}";
-            Services.Trace.Log("capture", $"published {shot.PixelWidth}x{shot.PixelHeight} to clipboard");
+            Services.Trace.Log("capture", $"published {shot.PixelWidth}x{shot.PixelHeight} to clipboard (baked={effectsAlreadyBaked})");
         }
         catch (Exception ex)
         {

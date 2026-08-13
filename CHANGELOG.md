@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.14.2] — 2026-07-16
+
+### Fixed — captures stopped landing in the tray list
+A regression in v2.14.0: sending a capture (from the selection popup OR
+from annotate) no longer added it to the ClipNinja list. Cause: the
+publish step suppressed the clipboard watcher to avoid double-applying
+effects — but the watcher is exactly what adds the captured image to
+the list, so suppressing it dropped the capture entirely.
+
+Fixed by never suppressing on publish. Instead, when the annotator has
+already baked its per-image effects, a one-shot flag tells the watcher
+to add the image to the list without re-applying the global effects.
+Plain captures apply the global effects and land in the list as before.
+
+## [2.14.1] — 2026-07-16
+
+### Changed — drop shadow and torn edges are now fully independent
+Separate toggles everywhere (annotator + settings); torn-without-shadow
+flattens onto white so ragged edges don't paste black.
+
 ## [2.14.1] — 2026-07-16
 
 ### Changed — drop shadow and torn edges are now fully independent
