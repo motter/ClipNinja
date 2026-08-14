@@ -1368,11 +1368,12 @@ public partial class MainWindow : Window
         try
         {
             TrayLaunchOnStartupItem.IsChecked = Services.StartupService.IsEnabled();
-            // Show current border state in the menu label rather than via a
-            // checkmark — easier to read and less prone to inverted-state bugs.
-            TrayImageBorderItem.Header = _vm.Settings.AddBorderToImages
-                ? "Black border on screenshots: ON"
-                : "Black border on screenshots: OFF";
+            // Reflect current effect state as checkmarks on the three
+            // checkable items (matching the header pills + Settings).
+            TrayShadowItem.IsChecked = _vm.Settings.AddDropShadowToImages;
+            TrayBorderItem.IsChecked = _vm.Settings.AddBorderToImages;
+            TrayTornItem.IsChecked = _vm.Settings.AddTornTopEdge || _vm.Settings.AddTornBottomEdge ||
+                                     _vm.Settings.AddTornLeftEdge || _vm.Settings.AddTornRightEdge;
             RebuildMonitorSubmenu();
         }
         catch { /* leave whatever it was */ }
@@ -1452,6 +1453,26 @@ public partial class MainWindow : Window
         ToggleImageBorder();
     }
 
+    /// <summary>Tray shadow toggle — routes through the same logic as the
+    /// header pill so all surfaces stay in sync.</summary>
+    private void OnTrayShadow_Click(object sender, RoutedEventArgs e) => OnShadowToggle_Click(sender, e);
+
+    /// <summary>Tray torn-edge toggle — same logic as the header pill.</summary>
+    private void OnTrayTorn_Click(object sender, RoutedEventArgs e) => OnTornToggle_Click(sender, e);
+
+    /// <summary>Open the ClipNinja data folder in Explorer (moved under
+    /// the Troubleshooting submenu).</summary>
+    private void OnTrayOpenDataFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dir = _vm.Persistence.AppDir;
+            if (System.IO.Directory.Exists(dir))
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Services.Trace.Log("tray", $"open data folder failed: {ex.Message}"); }
+    }
+
     /// <summary>Header-bar quick toggle — same behavior as the tray item.</summary>
     private void OnBorderToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -1469,14 +1490,12 @@ public partial class MainWindow : Window
         bool want = !_vm.Settings.AddBorderToImages;
         _vm.Settings.AddBorderToImages = want;
         _clipWatcher.AddBorderToImages = want;
-        TrayImageBorderItem.Header = want
-            ? "Black border on screenshots: ON"
-            : "Black border on screenshots: OFF";
         UpdateBorderToggleVisual();
+        RefreshEffectToggles();
         _vm.ScheduleSave();
         _vm.StatusText = want
-            ? "✓ Screenshots will get a black border"
-            : "Screenshots will be captured raw (no border)";
+            ? "✓ New captures will get a black border"
+            : "Border off for new captures";
     }
 
     /// <summary>Sync the header toggle button's look with the current
@@ -1871,15 +1890,8 @@ public partial class MainWindow : Window
         _clipWatcher.AddTornBottomEdge = _vm.Settings.AddTornBottomEdge;
         _clipWatcher.AddTornLeftEdge = _vm.Settings.AddTornLeftEdge;
         _clipWatcher.AddTornRightEdge = _vm.Settings.AddTornRightEdge;
-        // Refresh the tray menu label so it matches the new state next time
-        // the user opens the tray menu.
-        try
-        {
-            TrayImageBorderItem.Header = _vm.Settings.AddBorderToImages
-                ? "Black border on screenshots: ON"
-                : "Black border on screenshots: OFF";
-        }
-        catch { }
+        // The tray effect items refresh themselves on open
+        // (OnTrayContextMenu_Opened), so nothing to set here.
         // Keep the header effect toggles in sync too.
         UpdateBorderToggleVisual();
         RefreshEffectToggles();

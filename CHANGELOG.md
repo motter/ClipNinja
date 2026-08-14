@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.16.0] — 2026-07-16
+
+### Changed — consistency pass across menus, settings, and wording
+- **Tray menu effects:** the single "Black border" item is replaced by
+  three checkable items — Drop shadow, Black border, Torn edges —
+  matching the header pills, the annotator, and Settings. All four
+  surfaces now agree and stay in sync.
+- **Tray menu icons:** every action item now has an icon (Show/hide,
+  Settings, Clear everything, Exit, etc.) instead of a scattered mix.
+- **Troubleshooting submenu:** the trace log, image-debug log, and
+  "Open data folder" moved into a 🔧 Troubleshooting submenu so the
+  everyday tray menu is less cluttered.
+- **Settings reorg:** the three capture effects moved out of "Behavior"
+  into their own "Capture effects" section, with a note that they're
+  also on the header row and per-image in the annotator.
+- **Wording:** destructive actions standardized — "Remove" for a single
+  item, "Clear" for a whole list ("Clear history", "Clear everything").
+
 ## [2.15.0] — 2026-07-16
 
 ### Added — quick effect toggles in the header

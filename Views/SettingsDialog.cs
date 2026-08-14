@@ -87,26 +87,22 @@ public static class SettingsDialog
         };
         root.Children.Add(showNinja);
 
-        var borderCheck = MakeCheck("Add black border to captured images",
-            "When ClipNinja captures a screenshot, bake a thin black border into the saved image. Helps screenshots stand out when pasted into documents.",
-            settings.AddBorderToImages, fg, subFg);
-        borderCheck.Click += (_, _) =>
+        // ── Capture effects ──────────────────────────────────────────
+        // The three baked-in effects, split out from "Behavior" (they're
+        // presentation, not behavior). These are the same switches as the
+        // header pills and the annotator's per-image toggles.
+        root.Children.Add(SectionHeader("Capture effects", accent));
+        root.Children.Add(new TextBlock
         {
-            settings.AddBorderToImages = borderCheck.IsChecked == true;
-            onSettingsChanged();
-        };
-        root.Children.Add(borderCheck);
+            Text = "Applied to NEW captures. Also toggleable from the header row, and per-image in the annotator.",
+            Foreground = subFg,
+            FontSize = 10,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 6),
+        });
 
-        // Single "polished look" toggle — a clean soft drop shadow on a
-        // white backing, exactly like Greenshot. Torn edges were dropped:
-        // they rely on transparency, which the Windows clipboard discards,
-        // so they'd paste as black or vanish on white. Shadow-on-white
-        // survives paste everywhere.
-        // Drop shadow and torn edges are INDEPENDENT toggles — either,
-        // both, or neither. (They can also be toggled per-image in the
-        // annotator; these are the defaults for new captures.)
-        var shadowCheck = MakeCheck("Add soft drop shadow to captured images",
-            "Bake a soft Greenshot-style drop shadow around new screenshots so they lift off the page when pasted into a document. Applies to NEW captures only.",
+        var shadowCheck = MakeCheck("Soft drop shadow",
+            "Bake a soft Greenshot-style drop shadow around new screenshots so they lift off the page when pasted into a document.",
             settings.AddDropShadowToImages, fg, subFg);
         shadowCheck.Click += (_, _) =>
         {
@@ -115,12 +111,22 @@ public static class SettingsDialog
         };
         root.Children.Add(shadowCheck);
 
+        var borderCheck = MakeCheck("Black border",
+            "Bake a thin black border into the saved image so screenshots stand out when pasted into documents.",
+            settings.AddBorderToImages, fg, subFg);
+        borderCheck.Click += (_, _) =>
+        {
+            settings.AddBorderToImages = borderCheck.IsChecked == true;
+            onSettingsChanged();
+        };
+        root.Children.Add(borderCheck);
+
         // Torn edges are stored as four per-side flags; the UI treats
         // them as one "all around" toggle (which is how they're applied).
         bool tornInitial = settings.AddTornTopEdge || settings.AddTornBottomEdge ||
                            settings.AddTornLeftEdge || settings.AddTornRightEdge;
-        var tornCheck = MakeCheck("Add torn paper edges to captured images",
-            "Bake a ragged torn-paper edge all the way around new screenshots. Works with or without the drop shadow. Applies to NEW captures only.",
+        var tornCheck = MakeCheck("Torn paper edges",
+            "Bake a ragged torn-paper edge all the way around new screenshots. Works with or without the drop shadow.",
             tornInitial, fg, subFg);
         tornCheck.Click += (_, _) =>
         {
@@ -505,7 +511,7 @@ public static class SettingsDialog
         // Clear history button
         var clearHistoryBtn = new Button
         {
-            Content = "🗑️ Clear all history items",
+            Content = "🗑️ Clear history",
             Padding = new Thickness(10, 4, 10, 4),
             Margin = new Thickness(0, 6, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,

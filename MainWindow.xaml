@@ -491,29 +491,39 @@
                         TrayLeftMouseUp="OnTrayShow_Click">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu Opened="OnTrayContextMenu_Opened">
-                    <MenuItem Header="Show / Hide ClipNinja" Click="OnTrayShow_Click" />
+                    <MenuItem Header="👁️ Show / hide ClipNinja" Click="OnTrayShow_Click" />
                     <Separator />
-                    <MenuItem x:Name="TrayLaunchOnStartupItem"
-                              Header="Launch on Windows startup"
-                              IsCheckable="True"
-                              Click="OnTrayLaunchOnStartup_Click" />
-                    <MenuItem x:Name="TrayImageBorderItem"
-                              Header="Black border on screenshots: ON"
-                              Click="OnTrayImageBorder_Click" />
-                    <Separator />
-                    <MenuItem x:Name="TrayCaptureRegionItem" Header="📷 Capture region"      Click="OnTrayCaptureRegion_Click" InputGestureText="Ctrl+Shift+C" />
+                    <MenuItem x:Name="TrayCaptureRegionItem" Header="📷 Capture region" Click="OnTrayCaptureRegion_Click" InputGestureText="Ctrl+Shift+C" />
                     <!-- Children (All monitors / Monitor 1 / 2 / …) are rebuilt
                          in OnTrayContextMenu_Opened so hot-plugged displays
                          show up without a restart. -->
                     <MenuItem x:Name="TrayCaptureFullItem"   Header="🖥️ Capture full screen" />
                     <Separator />
-                    <MenuItem Header="Settings…"  Click="OnTraySettings_Click" />
-                    <MenuItem Header="⬆️ Check for updates…" Click="OnTrayCheckUpdates_Click" />
-                    <MenuItem Header="Clear everything" Click="OnTrayClearAll_Click" />
-                    <MenuItem Header="Open trace log…" Click="OnTrayOpenTrace_Click" />
-                    <MenuItem Header="Open image-debug log…" Click="OnTrayOpenImageDebug_Click" />
+                    <!-- Capture effects — three checkable items matching the
+                         header pills and the Settings section, so all three
+                         surfaces agree. Headers/checks refreshed in
+                         OnTrayContextMenu_Opened. -->
+                    <MenuItem x:Name="TrayShadowItem"  Header="🌫 Drop shadow on captures"  IsCheckable="True" Click="OnTrayShadow_Click" />
+                    <MenuItem x:Name="TrayBorderItem"  Header="🔳 Black border on captures" IsCheckable="True" Click="OnTrayImageBorder_Click" />
+                    <MenuItem x:Name="TrayTornItem"    Header="✂ Torn edges on captures"    IsCheckable="True" Click="OnTrayTorn_Click" />
                     <Separator />
-                    <MenuItem Header="Exit" Click="OnTrayExit_Click" />
+                    <MenuItem Header="⚙️ Settings…"           Click="OnTraySettings_Click" />
+                    <MenuItem Header="⬆️ Check for updates…"  Click="OnTrayCheckUpdates_Click" />
+                    <MenuItem x:Name="TrayLaunchOnStartupItem"
+                              Header="🚀 Launch on Windows startup"
+                              IsCheckable="True"
+                              Click="OnTrayLaunchOnStartup_Click" />
+                    <Separator />
+                    <MenuItem Header="🗑️ Clear everything…"   Click="OnTrayClearAll_Click" />
+                    <!-- Diagnostics tucked into a submenu so the everyday
+                         menu stays uncluttered. -->
+                    <MenuItem Header="🔧 Troubleshooting">
+                        <MenuItem Header="📁 Open data folder"       Click="OnTrayOpenDataFolder_Click" />
+                        <MenuItem Header="📄 Open trace log…"        Click="OnTrayOpenTrace_Click" />
+                        <MenuItem Header="📄 Open image-debug log…"  Click="OnTrayOpenImageDebug_Click" />
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="❌ Exit" Click="OnTrayExit_Click" />
                 </ContextMenu>
             </tb:TaskbarIcon.ContextMenu>
         </tb:TaskbarIcon>
@@ -552,7 +562,7 @@
                                    Style="{StaticResource HeaderTextStyle}"
                                    Margin="14,0,0,0">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text="  v2.15.0"
+                            <Run Text="  v2.16.0"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
@@ -1299,7 +1309,7 @@
                                      Foreground="{StaticResource SubTextBrush}" />
                             </TextBlock>
                             <Button Grid.Column="1"
-                                    Content="🗑️ Clear all"
+                                    Content="🗑️ Clear history"
                                     FontSize="10"
                                     Padding="6,2"
                                     Margin="0,0,6,0"
