@@ -562,7 +562,7 @@
                                    Style="{StaticResource HeaderTextStyle}"
                                    Margin="14,0,0,0">
                             <Run Text="🥷 ClipNinja" />
-                            <Run Text="  v2.16.0"
+                            <Run Text="  v2.16.1"
                                  FontSize="9"
                                  Foreground="{StaticResource SubTextBrush}"
                                  FontWeight="Normal" />
@@ -1587,7 +1587,7 @@
                                     Foreground="{StaticResource AccentBrush}"
                                     FontSize="10"
                                     FontWeight="Bold"
-                                    ToolTip="View / search items that have rolled out of the Recent list">
+                                    ToolTip="History holds items that have rolled out of the Recent list above. When Recent fills up, its oldest item moves here automatically — click to view, search, or restore them.">
                                 <TextBlock>
                                     <Run Text="📜 History (" />
                                     <Run Text="{Binding History.Items.Count, Mode=OneWay, FallbackValue=0}" />

@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.16.1] — 2026-07-16
+
+### Changed — clearer History button tooltip
+The 📜 History button now explains the model on hover: History holds
+items that have rolled out of the Recent list, which happens
+automatically when Recent fills up. Closes the last item from the
+design-consistency review.
+
 ## [2.16.0] — 2026-07-16
 
 ### Changed — consistency pass across menus, settings, and wording
