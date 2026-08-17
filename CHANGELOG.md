@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.16.2] — 2026-07-16
+
+### Changed — torn edge is much shallower
+The torn edge was cutting deep into content (up to ~23px on a typical
+capture). It's now a shallow nibble at the very edge — a small fixed
+depth (3–8px) that no longer grows with image size — so it reads as
+torn paper without eating your text. Leave a little margin around
+content when capturing if you want the tear fully clear of it.
+
 ## [2.16.1] — 2026-07-16
 
 ### Changed — clearer History button tooltip

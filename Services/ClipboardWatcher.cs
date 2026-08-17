@@ -1066,29 +1066,32 @@ public class ClipboardWatcher : IDisposable
             var pixels = new byte[stride * h];
             bgra.CopyPixels(pixels, stride, 0);
 
-            // Depth for horizontal tears (top/bottom) keys off height;
-            // vertical tears (left/right) key off width. Same clamps.
-            int depthH = Math.Clamp((int)(h * 0.06), 8, 40);
-            int depthV = Math.Clamp((int)(w * 0.06), 8, 40);
+            // Shallow "nibble" tear — a small fixed depth that does NOT
+            // grow with image size, so it never chews far into content.
+            // (Was h*0.06 up to 40px, which cut into text.) Leave a little
+            // margin around content when capturing if you want the tear to
+            // stay clear of it.
+            int depth = Math.Clamp(Math.Min(w, h) / 90, 3, 8);
+            int depthH = depth, depthV = depth;
 
             // Build a per-position offset array along an edge of the
             // given length: how many pixels are "torn off". Interpolate
             // between random keypoints every 6-16 positions so the tear
             // looks jagged but coherent. Seeded deterministically; the
             // salt keeps the four edges visually distinct.
-            int[] BuildTearProfile(int length, int depth, int salt)
+            int[] BuildTearProfile(int length, int d, int salt)
             {
                 var rng = new System.Random(w * 73856093 ^ h * 19349663 ^ salt * 83492791);
                 var offsets = new int[length];
                 int pos = 0;
                 int prevPos = 0;
-                int prevOff = rng.Next(0, depth + 1);
+                int prevOff = rng.Next(0, d + 1);
                 offsets[0] = prevOff;
                 while (pos < length - 1)
                 {
                     int step = 6 + rng.Next(11);  // 6..16
                     int nextPos = Math.Min(length - 1, pos + step);
-                    int nextOff = rng.Next(0, depth + 1);
+                    int nextOff = rng.Next(0, d + 1);
                     for (int i = prevPos + 1; i <= nextPos; i++)
                     {
                         double t = (double)(i - prevPos) / (nextPos - prevPos);

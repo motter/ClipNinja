@@ -1519,8 +1519,10 @@ public static class ImageAnnotator
     /// to the bake, but a faithful preview of "torn all around".</summary>
     private static Geometry BuildTornClip(int w, int h)
     {
-        int depthH = Math.Clamp((int)(h * 0.06), 8, 40);
-        int depthV = Math.Clamp((int)(w * 0.06), 8, 40);
+        // Match the shallow bake depth (a small nibble, not a deep bite).
+        int depth = Math.Clamp(Math.Min(w, h) / 90, 3, 8);
+        int depthH = depth;
+        int depthV = depth;
         var rng = new Random(w * 73856093 ^ h * 19349663);
         var pts = new List<Point>();
         // Walk the perimeter, jittering inward by a random depth every
