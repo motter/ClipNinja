@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.17.0] — 2026-07-16
+
+### Added — pick-a-screen overlay for full-screen capture
+Pressing the full-screen capture hotkey on a multi-monitor setup now
+dims all screens and shows a big number on each. Press the number key
+for the screen you want, **A** to capture all screens, or **Esc** to
+cancel (you can also click a screen's number). Single-monitor setups
+skip the picker and capture straight away. The tray "Capture full
+screen ▸ All monitors / Monitor N" items still work as direct shortcuts.
+
 ## [2.16.2] — 2026-07-16
 
 ### Changed — torn edge is much shallower

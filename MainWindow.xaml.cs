@@ -1741,7 +1741,7 @@ public partial class MainWindow : Window
     private void OnCaptureButton_Click(object sender, RoutedEventArgs e) => StartRegionCapture();
 
     private void OnTrayCaptureRegion_Click(object sender, RoutedEventArgs e) => StartRegionCapture();
-    private void OnTrayCaptureFull_Click(object sender, RoutedEventArgs e) => CaptureFullScreenNow();
+    private void OnTrayCaptureFull_Click(object sender, RoutedEventArgs e) => CaptureWholeVirtualDesktop();
 
     /// <summary>Open the frozen-screen region selector; on selection,
     /// route the crop through the clipboard so the watcher ingests it
@@ -1783,6 +1783,43 @@ public partial class MainWindow : Window
     {
         try
         {
+            var mons = Services.ScreenCaptureService.GetMonitors();
+            // One monitor → no point asking; capture it directly.
+            if (mons.Count <= 1)
+            {
+                CaptureWholeVirtualDesktop();
+                return;
+            }
+
+            // Multiple monitors → show the dimmed picker so the user can
+            // press 1–N for a specific screen, A for all, or Esc to cancel.
+            var (choice, index) = Views.MonitorPickerWindow.Pick();
+            switch (choice)
+            {
+                case Views.MonitorPickerWindow.Choice.Cancel:
+                    return;
+                case Views.MonitorPickerWindow.Choice.All:
+                    CaptureWholeVirtualDesktop();
+                    return;
+                case Views.MonitorPickerWindow.Choice.Monitor:
+                    CaptureMonitorNow(index);
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Services.Trace.Log("capture", $"full capture (picker) failed: {ex}");
+            _vm.StatusText = $"Capture failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>Capture the entire virtual desktop (all monitors) and
+    /// route it through the post-capture chooser. This is the "A = all"
+    /// path and the single-monitor path.</summary>
+    private void CaptureWholeVirtualDesktop()
+    {
+        try
+        {
             bool wasVisible = IsVisible;
             if (wasVisible) Hide();
             Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
@@ -1798,7 +1835,7 @@ public partial class MainWindow : Window
             System.Windows.Point? anchor = prim.width > 0
                 ? new System.Windows.Point(prim.x + prim.width / 2.0, prim.y + prim.height / 2.0)
                 : null;
-            ShowCaptureChooser(shot, CaptureFullScreenNow, anchor);
+            ShowCaptureChooser(shot, CaptureWholeVirtualDesktop, anchor);
         }
         catch (Exception ex)
         {
