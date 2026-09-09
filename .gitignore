@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+publish/
+
+# Visual Studio / VS Code workspace files
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# Resharper
+_ReSharper.*/
+*.DotSettings.user
+
+# Rider
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# NuGet
+*.nupkg
+packages/
+
+# Test results
+TestResults/
+
+# Diagnostic / dev artifacts
+trace.log
+trace.log.prev
+*.log
