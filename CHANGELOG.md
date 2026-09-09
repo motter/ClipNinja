@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.18.0] — 2026-09-09
+
+### Fixed — re-copying a ClipNinja image no longer stacks effects
+If you copied an image that ClipNinja had already processed (border,
+torn edge, or drop shadow) and shared it again, the app piled a SECOND
+set of effects on top — torn-on-torn, border-on-border. Two causes:
+effects were applied before the "is this my own image?" check, and
+there was no way to recognize a previously-processed image.
+
+Now, whenever ClipNinja bakes effects it embeds an invisible marker in
+the image (a 1-bit tweak to a few edge pixels — imperceptible, and it
+survives the clipboard). When an image comes in already carrying that
+marker, ClipNinja recognizes it as its own output and skips effects
+entirely, keeping it exactly as-is. Fresh screenshots are unaffected.
+
 ## [2.17.1] — 2026-09-09
 
 ### Fixed — annotator crash when grabbing a region into an image

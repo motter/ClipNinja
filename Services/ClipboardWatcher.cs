@@ -193,6 +193,15 @@ public class ClipboardWatcher : IDisposable
                     // WITHOUT re-applying — but only for this one image.
                     bool skipFx = SkipEffectsOnce;
                     SkipEffectsOnce = false;
+                    // If the image already carries our invisible marker,
+                    // it's a ClipNinja-processed image being re-copied —
+                    // skip effects entirely so we don't stack a second
+                    // border / torn edge on top of the first.
+                    if (!skipFx && HasProcessedMarker(bmp))
+                    {
+                        skipFx = true;
+                        Trace.Log("watcher", "image already processed (marker present) — skipping effects");
+                    }
                     bool tornAny = AddTornTopEdge || AddTornBottomEdge || AddTornLeftEdge || AddTornRightEdge;
                     if (!skipFx && (tornAny || AddBorderToImages || AddDropShadowToImages))
                     {
@@ -855,7 +864,72 @@ public class ClipboardWatcher : IDisposable
             // the tears become white and survive paste.
             bmp = FlattenOntoWhite(bmp);
         }
+        // Stamp an invisible marker so that if this image is copied AGAIN
+        // later, we recognize it as our own output and don't pile on a
+        // second set of effects (torn-on-torn, border-on-border).
+        bmp = StampProcessedMarker(bmp);
         return bmp;
+    }
+
+    // A 32-bit magic embedded in the low bit of the BLUE channel of the
+    // first 32 pixels of the top row. Blue is part of RGB so it survives
+    // the clipboard's alpha-dropping DIB round-trip; a ±1 change to one
+    // channel of 32 edge pixels is invisible. "CNP1" = ClipNinja
+    // Processed v1.
+    private const uint ProcessedMagic = 0x434E5031;
+    private const int MarkerPixels = 32;
+
+    /// <summary>Embed the invisible "already processed by ClipNinja"
+    /// marker. Returns a new bitmap (or the input unchanged if it's too
+    /// small to mark).</summary>
+    public static BitmapSource StampProcessedMarker(BitmapSource src)
+    {
+        try
+        {
+            if (src.PixelWidth < MarkerPixels + 8) return src;   // too narrow
+            var bgra = src.Format == System.Windows.Media.PixelFormats.Bgra32
+                ? src
+                : new FormatConvertedBitmap(src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+            int w = bgra.PixelWidth, h = bgra.PixelHeight;
+            int stride = w * 4;
+            var px = new byte[stride * h];
+            bgra.CopyPixels(px, stride, 0);
+            for (int i = 0; i < MarkerPixels; i++)
+            {
+                uint bit = (ProcessedMagic >> (MarkerPixels - 1 - i)) & 1u;
+                int bIdx = i * 4;   // blue byte of pixel i in row 0
+                px[bIdx] = (byte)((px[bIdx] & 0xFE) | bit);
+            }
+            var wb = new WriteableBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+            wb.WritePixels(new System.Windows.Int32Rect(0, 0, w, h), px, stride, 0);
+            wb.Freeze();
+            return wb;
+        }
+        catch { return src; }
+    }
+
+    /// <summary>True if this image carries ClipNinja's invisible
+    /// "already processed" marker — i.e. it's our own output being
+    /// re-copied, so we should NOT re-apply effects.</summary>
+    public static bool HasProcessedMarker(BitmapSource src)
+    {
+        try
+        {
+            if (src.PixelWidth < MarkerPixels + 8) return false;
+            var bgra = src.Format == System.Windows.Media.PixelFormats.Bgra32
+                ? src
+                : new FormatConvertedBitmap(src, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+            // Only need the first row.
+            int w = bgra.PixelWidth;
+            int stride = w * 4;
+            var row = new byte[stride];
+            bgra.CopyPixels(new System.Windows.Int32Rect(0, 0, w, 1), row, stride, 0);
+            uint val = 0;
+            for (int i = 0; i < MarkerPixels; i++)
+                val = (val << 1) | (uint)(row[i * 4] & 1);
+            return val == ProcessedMagic;
+        }
+        catch { return false; }
     }
 
     /// <summary>Composite an image (which may have alpha, e.g. torn
