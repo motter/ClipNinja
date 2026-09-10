@@ -32,6 +32,10 @@ public partial class MainWindow : Window
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
         Services.Trace.Log("startup", "OnWindowLoaded begin");
+        RestoreWindowPosition();
+        // Persist position whenever the user moves the window, so it
+        // reopens where they left it.
+        LocationChanged += (_, _) => SaveWindowPosition();
         _clipWatcher.AttachTo(this);
         _clipWatcher.ContentChanged += (_, content) =>
         {
@@ -2456,6 +2460,50 @@ public partial class MainWindow : Window
             ShoutBubble.BeginAnimation(System.Windows.UIElement.OpacityProperty, fadeOut);
         };
         _shoutFadeTimer.Start();
+    }
+
+    /// <summary>Place the main window at its last-used position, or —
+    /// the first time, or if the saved spot is now off-screen — at a
+    /// sensible default in the bottom-right near the tray. Fixes the
+    /// window opening in an awkward spot near the taskbar.</summary>
+    private void RestoreWindowPosition()
+    {
+        try
+        {
+            var wa = SystemParameters.WorkArea;
+            double left = _vm.Settings.WindowLeft;
+            double top = _vm.Settings.WindowTop;
+
+            bool haveSaved = !double.IsNaN(left) && !double.IsNaN(top);
+            // Guard against a saved position that's now off-screen (e.g. a
+            // monitor was unplugged): require the window to be mostly
+            // within the current work area.
+            bool onScreen = haveSaved &&
+                left > wa.Left - Width + 80 && left < wa.Right - 80 &&
+                top > wa.Top - 40 && top < wa.Bottom - 80;
+
+            if (!onScreen)
+            {
+                // Default: bottom-right, a comfortable margin off the
+                // corner, above the taskbar.
+                left = wa.Right - Width - 24;
+                top = wa.Bottom - Height - 24;
+                if (top < wa.Top + 8) top = wa.Top + 8;   // short screens
+            }
+            Left = left;
+            Top = top;
+        }
+        catch { /* WPF will fall back to its own placement */ }
+    }
+
+    private void SaveWindowPosition()
+    {
+        // Only remember a "real" position — ignore minimized/odd states.
+        if (WindowState != WindowState.Normal) return;
+        if (double.IsNaN(Left) || double.IsNaN(Top)) return;
+        _vm.Settings.WindowLeft = Left;
+        _vm.Settings.WindowTop = Top;
+        _vm.ScheduleSave();
     }
 
     private void ToggleVisibility()

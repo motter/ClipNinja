@@ -64,16 +64,25 @@ public static class ImageAnnotator
         public Color Bg = Colors.Black;
     }
 
-    /// <param name="onSendToTray">When provided, the primary Save button
-    /// becomes "Save &amp; send" and calls this with the flattened image
-    /// instead of returning it — the annotator closes straight to the
-    /// tray, no bounce back to the capture chooser. A secondary
-    /// "Back to options" button still returns the edited image normally.
+    /// <param name="onSendToTray">Send the finished image to the tray/
+    /// clipboard. Its presence puts the annotator in "full action" mode
+    /// (Send / Quick save / Save as), used when launched from a capture.
     /// When null (e.g. editing an existing tray slot), Save behaves the
     /// classic way and returns the result.</param>
+    /// <param name="onSendToTray">Send the finished image to the tray/
+    /// clipboard.</param>
+    /// <param name="onQuickSave">Quick-save the finished image to the
+    /// configured folder (falls back to Save-as if unset). When provided
+    /// alongside onSendToTray, the annotator owns the full post-capture
+    /// action set (Send / Quick save / Save as) and the capture chooser
+    /// closes when annotation starts.</param>
+    /// <param name="onSaveAs">Save the finished image via a name/folder
+    /// picker.</param>
     public static BitmapSource? Show(Window owner, BitmapSource source,
         Models.AppSettings? settings = null, Action? persistSettings = null,
-        Action<BitmapSource>? onSendToTray = null)
+        Action<BitmapSource>? onSendToTray = null,
+        Action<BitmapSource>? onQuickSave = null,
+        Action<BitmapSource>? onSaveAs = null)
     {
         // Last-used preferences (color / size / text style) load from
         // settings when provided and save back on a successful Save —
@@ -1413,27 +1422,39 @@ public static class ImageAnnotator
             IsCancel = true,
             Cursor = Cursors.Hand,
         };
-        // In send mode, offer a secondary "Back to options" that returns
-        // the edited image to the chooser instead of sending — so the
-        // chooser flow (Save-as, quick-save) is still reachable for
-        // people who annotated first.
-        Button? backBtn = null;
-        if (onSendToTray is not null)
+
+        // "Full action" mode: when the caller passes the post-capture
+        // callbacks, the annotator OWNS the whole action set (Save as /
+        // Quick save / Send) — the capture chooser has closed. Otherwise
+        // (editing an existing tray slot) it's just Save annotations.
+        bool fullActions = onSendToTray is not null;
+
+        Button? saveAsBtn = null, quickSaveBtn = null;
+        if (fullActions && onSaveAs is not null)
         {
-            backBtn = new Button
+            saveAsBtn = new Button
             {
-                Content = "Back to options",
-                Padding = new Thickness(14, 5, 14, 5),
+                Content = "💾 Save as…",
+                Padding = new Thickness(12, 5, 12, 5),
                 Margin = new Thickness(0, 0, 8, 0),
                 Cursor = Cursors.Hand,
-                ToolTip = "Return to the capture options (save-as, quick-save) with your edits",
+                ToolTip = "Save the annotated image to a file you choose",
+            };
+        }
+        if (fullActions && onQuickSave is not null)
+        {
+            quickSaveBtn = new Button
+            {
+                Content = "💾 Quick save",
+                Padding = new Thickness(12, 5, 12, 5),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Save the annotated image straight to your quick-save folder",
             };
         }
         var saveBtn = new Button
         {
-            // Send mode: Save means "send straight to ClipNinja" — the
-            // common case, and what you asked for (no bounce back).
-            Content = onSendToTray is not null ? "Save & send to ClipNinja" : "Save annotations",
+            Content = fullActions ? "📋 Send to ClipNinja" : "Save annotations",
             Padding = new Thickness(14, 5, 14, 5),
             FontWeight = FontWeights.Bold,
             Cursor = Cursors.Hand,
@@ -1475,32 +1496,44 @@ public static class ImageAnnotator
         saveBtn.Click += (_, _) =>
         {
             var flat = PrepareResult();
-            if (onSendToTray is not null)
+            if (fullActions)
             {
-                // Send mode: hand the image straight to the tray and
-                // close. Nothing drawn → still send the plain capture
-                // (Save on an untouched shot means "I'm done, take it").
-                onSendToTray(flat ?? source);
+                // Send the finished image (falls back to the plain capture
+                // if nothing was drawn — "Send" on an untouched shot still
+                // means "take it").
+                onSendToTray!(flat ?? source);
                 sentToTray = true;
                 dlg.DialogResult = true;
                 return;
             }
-            // Classic mode: return the result to the caller.
+            // Classic mode (editing a tray slot): return to the caller.
             if (flat is null) { dlg.DialogResult = false; return; }
             result = flat;
             dlg.DialogResult = true;
         };
-        if (backBtn is not null)
+        if (saveAsBtn is not null)
         {
-            backBtn.Click += (_, _) =>
+            saveAsBtn.Click += (_, _) =>
             {
-                // Return the edited image to the chooser without sending.
-                result = PrepareResult();
-                dlg.DialogResult = result is not null;
+                var flat = PrepareResult();
+                onSaveAs!(flat ?? source);
+                sentToTray = true;   // treat as handled → close
+                dlg.DialogResult = true;
+            };
+        }
+        if (quickSaveBtn is not null)
+        {
+            quickSaveBtn.Click += (_, _) =>
+            {
+                var flat = PrepareResult();
+                onQuickSave!(flat ?? source);
+                sentToTray = true;
+                dlg.DialogResult = true;
             };
         }
         btnRow.Children.Add(cancelBtn);
-        if (backBtn is not null) btnRow.Children.Add(backBtn);
+        if (saveAsBtn is not null) btnRow.Children.Add(saveAsBtn);
+        if (quickSaveBtn is not null) btnRow.Children.Add(quickSaveBtn);
         btnRow.Children.Add(saveBtn);
         Grid.SetRow(btnRow, 2);
         root.Children.Add(btnRow);

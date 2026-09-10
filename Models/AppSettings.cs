@@ -22,6 +22,13 @@ public class AppSettings
     public bool ShowTrayHint { get; set; } = true;
     public bool LaunchOnStartup { get; set; } = false;
 
+    // Last on-screen position of the main window, so it reopens where you
+    // left it instead of wherever WPF decides (which could be the awkward
+    // spot near the taskbar). NaN = "never positioned yet" → use the
+    // default bottom-right placement on first show.
+    public double WindowLeft { get; set; } = double.NaN;
+    public double WindowTop { get; set; } = double.NaN;
+
     /// <summary>Bake a thin black border around captured images. Defaults
     /// to true — helpful for screenshots that get pasted into docs where
     /// they'd otherwise blend into the page background.</summary>

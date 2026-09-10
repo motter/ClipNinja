@@ -235,6 +235,61 @@ public static class CaptureChooser
             }
         }
 
+        // Bitmap-parameterized variants used when the ANNOTATOR performs
+        // the save (the chooser has already closed, so we can't rely on
+        // the `current` closure being the final image).
+        bool WritePngOf(BitmapSource bmp, string path)
+        {
+            try
+            {
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bmp));
+                using var fs = new System.IO.FileStream(path, System.IO.FileMode.Create);
+                encoder.Save(fs);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status($"Save failed: {ex.Message}");
+                Services.Trace.Log("capture", $"annotator save failed: {ex}");
+                return false;
+            }
+        }
+
+        void SaveAsImage(BitmapSource bmp)
+        {
+            var initialDir = !string.IsNullOrWhiteSpace(settings.QuickSaveFolder)
+                             && System.IO.Directory.Exists(settings.QuickSaveFolder)
+                ? settings.QuickSaveFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            var picker = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save screenshot",
+                Filter = "PNG image (*.png)|*.png",
+                DefaultExt = ".png",
+                FileName = $"Screenshot {DateTime.Now:yyyy-MM-dd HHmmss}.png",
+                InitialDirectory = initialDir,
+            };
+            if (picker.ShowDialog() != true) return;
+            if (WritePngOf(bmp, picker.FileName))
+                status($"✓ Saved: {System.IO.Path.GetFileName(picker.FileName)}");
+        }
+
+        void QuickSaveImage(BitmapSource bmp)
+        {
+            if (string.IsNullOrWhiteSpace(settings.QuickSaveFolder)
+                || !System.IO.Directory.Exists(settings.QuickSaveFolder))
+            {
+                SaveAsImage(bmp);   // no folder configured → named save
+                return;
+            }
+            var path = System.IO.Path.Combine(
+                settings.QuickSaveFolder,
+                $"Screenshot {DateTime.Now:yyyy-MM-dd HHmmss}.png");
+            if (WritePngOf(bmp, path))
+                status($"✓ Quick-saved: {System.IO.Path.GetFileName(path)}");
+        }
+
         void SaveAsDialog()
         {
             var initialDir = !string.IsNullOrWhiteSpace(settings.QuickSaveFolder)
@@ -269,27 +324,18 @@ public static class CaptureChooser
 
         annotateBtn.Click += (_, _) =>
         {
-            // The annotator opens modally ON TOP of this chooser (it's
-            // the owner). In send mode its primary button is "Save &
-            // send to ClipNinja" — which sends straight to the tray and
-            // closes BOTH windows (no bounce back here). Its secondary
-            // "Back to options" returns the edited image to this chooser
-            // (for save-as / quick-save on an annotated shot).
-            bool sent = false;
-            var edited = ImageAnnotator.Show(dlg, current, settings, persistSettings,
-                onSendToTray: img =>
-                {
-                    // The annotator already baked its per-image effects.
-                    sendToClipNinja(img, true);
-                    sent = true;
-                });
-            if (sent) { dlg.Close(); return; }
-            if (edited is not null)
+            // Annotating hands the whole post-capture flow to the
+            // annotator: the chooser closes, and the annotator carries
+            // its own Send / Quick save / Save as actions. No bounce back.
+            var img = current;
+            dlg.Close();
+            owner.Dispatcher.BeginInvoke(new Action(() =>
             {
-                current = edited;
-                previewImg.Source = current;   // Button's inner Image
-                sizeInfo.Text = $"{current.PixelWidth} × {current.PixelHeight} px";
-            }
+                ImageAnnotator.Show(owner, img, settings, persistSettings,
+                    onSendToTray: b => sendToClipNinja(b, true),   // effects already baked
+                    onQuickSave: b => QuickSaveImage(b),
+                    onSaveAs: b => SaveAsImage(b));
+            }), System.Windows.Threading.DispatcherPriority.Background);
         };
 
         sendBtn.Click += (_, _) =>

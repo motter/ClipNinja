@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.19.0] — 2026-09-09
+
+### Fixed — main window remembers where you put it
+The window sometimes opened in an awkward spot near the taskbar because
+it had no saved position. It now remembers where you last moved it and
+reopens there; the first time (or if that spot is off-screen after a
+monitor change) it opens neatly in the bottom-right near the tray.
+
+### Changed — annotating hands off the whole capture flow
+Choosing Annotate now CLOSES the "Screenshot captured" popup and moves
+its actions onto the annotator itself. The annotator's button row is
+now **Cancel · Save as… · Quick save · Send to ClipNinja** — so once
+you decide to annotate, everything (send, quick-save, save-as) happens
+from the one window, instead of bouncing back to the popup. Editing an
+existing tray item with the pencil is unchanged.
+
 ## [2.18.0] — 2026-09-09
 
 ### Fixed — re-copying a ClipNinja image no longer stacks effects
