@@ -1,0 +1,1647 @@
+using System;
+using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+// ImplicitUsings pulls in System.IO globally, which also defines Path —
+// alias to the Shapes one we actually mean, or every `new Path {…}`
+// below is a CS0104 ambiguous-reference error.
+using Path = System.Windows.Shapes.Path;
+
+namespace ClipNinjaV2.Views;
+
+/// <summary>
+/// Image annotation editor: arrow, box, line, highlight, and obfuscate
+/// (pixelate) tools with undo and a five-swatch color palette drawn
+/// from the app's desert-sunset theme.
+///
+/// Design notes:
+///  • The image renders at 1:1 pixel scale inside a ScrollViewer, so
+///    coordinates map directly — no DPI math needed for hit-testing.
+///    (The bitmaps ClipNinja stores are always 96-DPI-normalized by
+///    the capture pipeline, so DIU == pixel here.)
+///  • Annotations are WPF Shape elements on a Canvas overlay while
+///    editing (cheap to add/remove for undo). On Save we render
+///    image + canvas together into a RenderTargetBitmap and hand the
+///    flattened result back to the caller.
+///  • Highlight = semi-transparent fill (40% alpha) so text stays
+///    readable under it — classic highlighter behavior.
+///  • Obfuscate = pixelate: the selected region of the SOURCE image
+///    is downscaled to ~12px blocks and re-upscaled with nearest-
+///    neighbor. During the drag you see a dashed preview rectangle;
+///    the mosaic is computed once on mouse-up (recomputing it every
+///    mouse-move would chug on large regions).
+///  • Undo = pop the last element off the canvas, regardless of type.
+///
+/// Returns the annotated bitmap, or null if the user canceled or made
+/// no changes.
+/// </summary>
+public static class ImageAnnotator
+{
+    private enum Tool { Select, Arrow, Box, Line, Highlight, Obfuscate, Text, Number }
+
+    /// <summary>Attached to every committed annotation via Tag. Gives
+    /// the Select tool what it needs to move/resize without re-deriving
+    /// geometry from rendered output: the kind (drives which handles
+    /// appear) and the two defining points (endpoints for line/arrow,
+    /// opposite corners for box/highlight/obfuscate; P1 = anchor point
+    /// for text/number). Mutated in place as the user drags — the
+    /// UIElement is never replaced, so the undo list stays valid.</summary>
+    private sealed class AnnotMeta
+    {
+        public string Kind = "";
+        public Point P1;
+        public Point P2;
+        // Text-label fields (Kind == "text"), so a committed label can be
+        // reopened for editing with its content and styling intact.
+        public string Text = "";
+        public double FontSizePx = 18;
+        public Color Fg = Colors.White;
+        public Color Bg = Colors.Black;
+    }
+
+    /// <param name="onSendToTray">Send the finished image to the tray/
+    /// clipboard. Its presence puts the annotator in "full action" mode
+    /// (Send / Quick save / Save as), used when launched from a capture.
+    /// When null (e.g. editing an existing tray slot), Save behaves the
+    /// classic way and returns the result.</param>
+    /// <param name="onSendToTray">Send the finished image to the tray/
+    /// clipboard.</param>
+    /// <param name="onQuickSave">Quick-save the finished image to the
+    /// configured folder (falls back to Save-as if unset). When provided
+    /// alongside onSendToTray, the annotator owns the full post-capture
+    /// action set (Send / Quick save / Save as) and the capture chooser
+    /// closes when annotation starts.</param>
+    /// <param name="onSaveAs">Save the finished image via a name/folder
+    /// picker.</param>
+    public static BitmapSource? Show(Window owner, BitmapSource source,
+        Models.AppSettings? settings = null, Action? persistSettings = null,
+        Action<BitmapSource>? onSendToTray = null,
+        Action<BitmapSource>? onQuickSave = null,
+        Action<BitmapSource>? onSaveAs = null)
+    {
+        // Last-used preferences (color / size / text style) load from
+        // settings when provided and save back on a successful Save —
+        // pick clay red + large once and every future session opens
+        // that way. Null settings (legacy callers) = golden defaults.
+        BitmapSource? result = null;
+        bool sentToTray = false;
+
+        var dlg = new Window
+        {
+            Owner = owner,
+            Title = "Annotate image — drag to draw",
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ShowInTaskbar = false,
+            Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x26, 0x20)),
+            // Open MAXIMIZED so the whole image is visible immediately —
+            // no manual resizing. The normal (restored) size is still set
+            // as a sensible fallback, clamped to 90% of the work area.
+            WindowState = WindowState.Maximized,
+            WindowStyle = WindowStyle.SingleBorderWindow,
+            Width = Math.Min(source.PixelWidth + 60, SystemParameters.WorkArea.Width * 0.9),
+            Height = Math.Min(source.PixelHeight + 130, SystemParameters.WorkArea.Height * 0.9),
+            MinWidth = 420,
+            MinHeight = 300,
+        };
+
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });  // toolbar
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });  // canvas
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });  // buttons
+
+        // ── Toolbar ───────────────────────────────────────────────────
+        var currentTool = Tool.Arrow;
+        var toolbar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(10, 8, 10, 8),
+        };
+        var toolButtons = new Dictionary<Tool, ToggleButton>();
+
+        ToggleButton MakeToolButton(Tool tool, string glyph, string tip)
+        {
+            var b = new ToggleButton
+            {
+                Content = glyph,
+                FontSize = 16,
+                Width = 44,
+                Height = 32,
+                Margin = new Thickness(0, 0, 6, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = tip,
+                IsChecked = tool == currentTool,
+            };
+            b.Click += (_, _) =>
+            {
+                currentTool = tool;
+                foreach (var kv in toolButtons) kv.Value.IsChecked = kv.Key == tool;
+            };
+            toolButtons[tool] = b;
+            toolbar.Children.Add(b);
+            return b;
+        }
+
+        MakeToolButton(Tool.Select, "↖", "Select — click an annotation to move / resize / delete it");
+        MakeToolButton(Tool.Arrow, "↗", "Arrow — drag from tail to tip");
+        MakeToolButton(Tool.Box, "▢", "Box — drag corner to corner");
+        MakeToolButton(Tool.Line, "╱", "Line — drag from end to end");
+        MakeToolButton(Tool.Highlight, "▆", "Highlight — semi-transparent marker box");
+        MakeToolButton(Tool.Obfuscate, "▦", "Obfuscate — pixelate a region (hide names, emails, secrets)");
+        MakeToolButton(Tool.Text, "T", "Text — click to type a label on the image");
+        MakeToolButton(Tool.Number, "①", "Number — each click drops the next step number (1, 2, 3…) for walkthroughs");
+
+        // ── Size selector: S / M / L ──────────────────────────────────
+        // Drives stroke width for arrow/box/line (2 / 3.5 / 6 px), font
+        // size for the text tool (13 / 18 / 26 px), and badge size for
+        // the number tool. One control, consistent meaning everywhere.
+        // Initial selection comes from settings (last-used).
+        var sizeDefs = new (string label, double stroke, double font, string tip)[]
+        {
+            ("S", 2.0, 13, "Small — thin strokes, small text"),
+            ("M", 3.5, 18, "Medium"),
+            ("L", 6.0, 26, "Large — thick strokes, big text"),
+        };
+        string currentSizeLabel = settings?.AnnotatorDefaultSize is "S" or "M" or "L"
+            ? settings.AnnotatorDefaultSize : "M";
+        double strokeWidth = sizeDefs.First(d => d.label == currentSizeLabel).stroke;
+        double textSize = sizeDefs.First(d => d.label == currentSizeLabel).font;
+        var sizeButtons = new List<ToggleButton>();
+        var sizePanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(14, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        foreach (var (label, stroke, font, tip) in sizeDefs)
+        {
+            var b = new ToggleButton
+            {
+                Content = label,
+                FontSize = 11,
+                Width = 28,
+                Height = 26,
+                Margin = new Thickness(0, 0, 3, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = tip,
+                IsChecked = label == currentSizeLabel,
+            };
+            b.Click += (_, _) =>
+            {
+                strokeWidth = stroke;
+                textSize = font;
+                currentSizeLabel = label;
+                foreach (var sb in sizeButtons) sb.IsChecked = sb == b;
+            };
+            sizeButtons.Add(b);
+            sizePanel.Children.Add(b);
+        }
+        toolbar.Children.Add(sizePanel);
+
+        // ── Color swatches — desert-sunset palette from the app theme ──
+        // Applies to arrow / box / line stroke and highlight fill.
+        // (Obfuscate ignores color; a mosaic has no ink.)
+        var swatchDefs = new (Color color, string name)[]
+        {
+            (Color.FromRgb(0xF4, 0xB8, 0x44), "Sun gold"),
+            (Color.FromRgb(0xE5, 0x9A, 0x2A), "Amber"),
+            (Color.FromRgb(0x7F, 0xB0, 0x69), "Agave green"),
+            (Color.FromRgb(0x8D, 0xA9, 0xB8), "Sky blue"),
+            (Color.FromRgb(0xE8, 0x38, 0x2A), "Red"),   // stark vermilion — reads clearly as "look here"
+        };
+        // Last-used color from settings ("#RRGGBB"); unknown → Sun gold.
+        static string HexOf(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+        var currentColor = swatchDefs[0].color;
+        if (settings is not null)
+        {
+            // Migrate the old clay red (#D9553F) to the new stark red so
+            // anyone who had red saved keeps red instead of silently
+            // reverting to gold.
+            var saved = string.Equals(settings.AnnotatorDefaultColor, "#D9553F", StringComparison.OrdinalIgnoreCase)
+                ? "#E8382A" : settings.AnnotatorDefaultColor;
+            foreach (var (color, _) in swatchDefs)
+                if (string.Equals(HexOf(color), saved, StringComparison.OrdinalIgnoreCase))
+                { currentColor = color; break; }
+        }
+        var swatchButtons = new List<Border>();
+        var swatchPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(16, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        foreach (var (color, name) in swatchDefs)
+        {
+            var isDefault = color == currentColor;
+            var swatch = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(4),
+                Background = new SolidColorBrush(color),
+                BorderBrush = Brushes.White,
+                BorderThickness = new Thickness(isDefault ? 2 : 0),
+                Margin = new Thickness(0, 0, 5, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = name,
+            };
+            swatch.MouseLeftButtonDown += (_, _) =>
+            {
+                currentColor = color;
+                foreach (var s in swatchButtons)
+                    s.BorderThickness = new Thickness(s == swatch ? 2 : 0);
+            };
+            swatchButtons.Add(swatch);
+            swatchPanel.Children.Add(swatch);
+        }
+        toolbar.Children.Add(swatchPanel);
+
+        // ── Text-label style toggle: dark / light background ──────────
+        // "dark"  = tinted near-black behind the text (original style)
+        // "light" = pale complementary field — e.g. clay-red text sits
+        //           on a pale blue box. Persisted like color/size.
+        string textStyle = settings?.AnnotatorTextStyle == "light" ? "light" : "dark";
+        var styleToggle = new ToggleButton
+        {
+            Content = "Aa",
+            FontSize = 11,
+            Width = 32,
+            Height = 26,
+            Margin = new Thickness(12, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            IsChecked = textStyle == "light",
+            ToolTip = "Text label background: light (pale complementary) vs dark (tinted). Applies to new labels.",
+        };
+        styleToggle.Click += (_, _) =>
+        {
+            textStyle = styleToggle.IsChecked == true ? "light" : "dark";
+        };
+        toolbar.Children.Add(styleToggle);
+
+        // 📋 Paste-image button — same action as Ctrl+V, for
+        // discoverability. (Declared here; the handler function is
+        // defined with the drawing interaction below — local functions
+        // are callable before their declaration point.)
+        var pasteBtn = new Button
+        {
+            Content = "📋",
+            FontSize = 12,
+            Width = 32,
+            Height = 26,
+            Margin = new Thickness(12, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            ToolTip = "Paste an image from the clipboard onto the canvas (Ctrl+V) — move/resize it with the Select tool",
+        };
+        toolbar.Children.Add(pasteBtn);
+
+        // 📷 Grab region — capture a NEW region of the screen and drop it
+        // onto the canvas. Solves "I need a shot of what's behind this
+        // window": the annotator hides itself, you drag-select the
+        // region, and it comes back with the capture pasted in as a
+        // movable object. (Wired after PasteImageFromClipboard exists.)
+        var grabBtn = new Button
+        {
+            Content = "📷",
+            FontSize = 12,
+            Width = 32,
+            Height = 26,
+            Margin = new Thickness(4, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            ToolTip = "Grab another screen region and drop it onto this image (hides the annotator while you select)",
+        };
+        toolbar.Children.Add(grabBtn);
+
+        var undoBtn = new Button
+        {
+            Content = "↩ Undo",
+            FontSize = 13,
+            Padding = new Thickness(10, 4, 10, 4),
+            Margin = new Thickness(16, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            ToolTip = "Remove the last annotation (Ctrl+Z)",
+            IsEnabled = false,
+        };
+        toolbar.Children.Add(undoBtn);
+
+        // ── Output scale ──────────────────────────────────────────────
+        // Resizes the SAVED image by a fixed factor. Annotations stay
+        // vector until flatten, so everything (image + arrows + text)
+        // is resampled cleanly at the chosen size rather than scaling a
+        // pre-rendered bitmap. 1.0 = original pixels. Applied only at
+        // Save/Send — the on-screen editing surface stays at native
+        // size so drawing coordinates never shift under you.
+        double outputScale = 1.0;
+        toolbar.Children.Add(new TextBlock
+        {
+            Text = "Size:",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x82, 0x74)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(16, 0, 4, 0),
+        });
+        var scaleCombo = new ComboBox
+        {
+            Width = 66,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = Cursors.Hand,
+            ToolTip = "Scale the saved/sent image (the editing view stays full size)",
+        };
+        var scaleFactors = new[] { 0.75, 1.00, 1.25, 1.50, 1.75, 2.00 };
+        foreach (var f in scaleFactors)
+            scaleCombo.Items.Add(new ComboBoxItem
+            {
+                Content = f.ToString("0.00") + "×",
+                Tag = f,
+                IsSelected = Math.Abs(f - 1.0) < 0.001,   // default 1.00×
+            });
+        // Live hint of the resulting pixel dimensions next to the combo.
+        var scaleDims = new TextBlock
+        {
+            FontSize = 10,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x82, 0x74)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+        };
+        void UpdateScaleDims() =>
+            scaleDims.Text = $"→ {(int)Math.Round(source.PixelWidth * outputScale)}×{(int)Math.Round(source.PixelHeight * outputScale)}";
+        // Set once the surface exists (below): applies the visual scale so
+        // the editing view reflects the chosen size. Declared here because
+        // the combo is built before the surface.
+        Action<double>? applyViewScale = null;
+        scaleCombo.SelectionChanged += (_, _) =>
+        {
+            if (scaleCombo.SelectedItem is ComboBoxItem ci && ci.Tag is double f)
+            {
+                outputScale = f;
+                UpdateScaleDims();
+                applyViewScale?.Invoke(f);
+            }
+        };
+        UpdateScaleDims();
+        toolbar.Children.Add(scaleCombo);
+        toolbar.Children.Add(scaleDims);
+
+        // ── Presentation effects (border / shadow / torn) ─────────────
+        // Per-image toggles that bake into the saved/sent output and show
+        // a live preview on the canvas. Initialized from the global
+        // capture defaults so the app-wide "Polished look" carries over,
+        // but each image can override. Torn reveals the shadow beneath,
+        // so enabling Torn also switches Shadow on.
+        bool fxBorder = settings?.AddBorderToImages ?? false;
+        bool fxShadow = settings?.AddDropShadowToImages ?? false;
+        bool fxTorn = settings is not null &&
+            (settings.AddTornTopEdge || settings.AddTornBottomEdge ||
+             settings.AddTornLeftEdge || settings.AddTornRightEdge);
+        // Preview hook, assigned once the surface + backing exist (below).
+        Action? refreshEffectPreview = null;
+
+        ToggleButton MakeFxButton(string glyph, string tip, bool initial, Action<bool> onToggle)
+        {
+            var tb = new ToggleButton
+            {
+                Content = glyph,
+                FontSize = 13,
+                Width = 32,
+                Height = 26,
+                Margin = new Thickness(4, 0, 0, 0),
+                IsChecked = initial,
+                Cursor = Cursors.Hand,
+                ToolTip = tip,
+            };
+            tb.Checked += (_, _) => { onToggle(true); refreshEffectPreview?.Invoke(); };
+            tb.Unchecked += (_, _) => { onToggle(false); refreshEffectPreview?.Invoke(); };
+            return tb;
+        }
+
+        toolbar.Children.Add(new TextBlock
+        {
+            Text = "  FX:",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x82, 0x74)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12, 0, 0, 0),
+        });
+        ToggleButton borderBtn = null!, shadowBtn = null!, tornBtn = null!;
+        borderBtn = MakeFxButton("🔳", "Black border on the saved image", fxBorder,
+            v => fxBorder = v);
+        shadowBtn = MakeFxButton("🌫", "Soft drop shadow (Greenshot-style) on the saved image", fxShadow,
+            v => fxShadow = v);
+        tornBtn = MakeFxButton("✂", "Torn paper edges all around the saved image", fxTorn,
+            v => fxTorn = v);
+        toolbar.Children.Add(borderBtn);
+        toolbar.Children.Add(shadowBtn);
+        toolbar.Children.Add(tornBtn);
+
+        toolbar.Children.Add(new TextBlock
+        {
+            Text = "Ctrl+V pastes an image • text: Enter = new line, Ctrl+Enter = done",
+            FontSize = 10,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x82, 0x74)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+        });
+
+        Grid.SetRow(toolbar, 0);
+        root.Children.Add(toolbar);
+
+        // ── Editing surface ───────────────────────────────────────────
+        // Image at 1:1 with a Canvas overlay of identical size. Both in
+        // a Grid inside a ScrollViewer so large screenshots scroll.
+        var imageEl = new Image
+        {
+            Source = source,
+            Width = source.PixelWidth,
+            Height = source.PixelHeight,
+            Stretch = Stretch.None,
+            SnapsToDevicePixels = true,
+        };
+        var overlay = new Canvas
+        {
+            Width = source.PixelWidth,
+            Height = source.PixelHeight,
+            Background = Brushes.Transparent,  // hit-testable everywhere
+            Cursor = Cursors.Cross,
+        };
+        var surface = new Grid { Width = source.PixelWidth, Height = source.PixelHeight };
+        surface.Children.Add(imageEl);
+        surface.Children.Add(overlay);
+        // Handle layer sits ABOVE the overlay so selection handles get
+        // first crack at mouse input. IsHitTestVisible=false when idle
+        // (Background=null makes empty space click-through regardless).
+        // Handles are hidden before Save so they never bake into the
+        // flattened output.
+        var handleLayer = new Canvas
+        {
+            Width = source.PixelWidth,
+            Height = source.PixelHeight,
+            Background = null,  // clicks pass through empty areas
+        };
+        surface.Children.Add(handleLayer);
+
+        // Visual scale: the Size dropdown now scales what you SEE, not
+        // just the saved file. A LayoutTransform on the surface makes the
+        // editing view grow/shrink and the ScrollViewer adapt. Crucially,
+        // mouse handlers read e.GetPosition(overlay), which returns
+        // coordinates in the overlay's OWN (un-scaled) space regardless
+        // of this transform — so drawing still lands pixel-accurately in
+        // native image coordinates. Flatten resets this transform before
+        // rendering, so the saved output is clean.
+        applyViewScale = s =>
+        {
+            surface.LayoutTransform = Math.Abs(s - 1.0) < 0.001
+                ? Transform.Identity
+                : new ScaleTransform(s, s);
+        };
+        applyViewScale(outputScale);   // honor a non-1.0 default
+
+        // Effect preview: the surface sits on a white "paper" backing so
+        // the shadow/torn preview matches the white-composited output.
+        // The backing + padding only appear when an effect is on, so a
+        // plain edit shows no extra chrome. Decorations are purely visual
+        // (Effect / Clip / a border rectangle) and don't touch the
+        // surface's internal coordinates, so drawing stays pixel-accurate.
+        var paperBacking = new System.Windows.Controls.Border
+        {
+            Background = Brushes.White,
+            Visibility = Visibility.Collapsed,
+        };
+        var borderRect = new Rectangle
+        {
+            Stroke = Brushes.Black,
+            StrokeThickness = 3,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        var effectHost = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        effectHost.Children.Add(paperBacking);
+        effectHost.Children.Add(surface);
+        effectHost.Children.Add(borderRect);
+
+        refreshEffectPreview = () =>
+        {
+            bool anyFx = fxBorder || fxShadow || fxTorn;
+            // White paper shows behind whenever any effect is on, with a
+            // margin so the shadow/tears have room to render.
+            paperBacking.Visibility = anyFx ? Visibility.Visible : Visibility.Collapsed;
+            int pad = fxShadow ? 16 : (anyFx ? 6 : 0);
+            surface.Margin = new Thickness(pad);
+            paperBacking.Margin = new Thickness(0);
+
+            // Shadow → soft DropShadowEffect on the surface (casts onto
+            // the white paper, like the baked output).
+            surface.Effect = fxShadow
+                ? new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 18,
+                    ShadowDepth = 4,
+                    Direction = 315,   // down-right
+                    Opacity = 0.42,
+                }
+                : null;
+
+            // Border → black rectangle stroke framing the surface.
+            borderRect.Visibility = fxBorder ? Visibility.Visible : Visibility.Collapsed;
+            borderRect.Margin = new Thickness(pad);
+
+            // Torn → ragged clip on the surface (revealing the white paper
+            // + shadow behind). Regenerated for the current size.
+            surface.Clip = fxTorn
+                ? BuildTornClip(source.PixelWidth, source.PixelHeight)
+                : null;
+        };
+        refreshEffectPreview();   // reflect the initial (settings-derived) state
+
+        var scroller = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = effectHost,
+            Margin = new Thickness(10, 0, 10, 0),
+        };
+        Grid.SetRow(scroller, 1);
+        root.Children.Add(scroller);
+
+        // ── Drawing interaction ───────────────────────────────────────
+        // (strokeWidth / textSize are declared with the S/M/L selector
+        // in the toolbar section above.)
+
+        // Undo is a List used as a stack (not Stack<T>) so the Select
+        // tool's Delete can remove an element from the MIDDLE without
+        // disturbing the rest of the ordering.
+        var undoStack = new List<UIElement>();
+        Point dragStart = default;
+        UIElement? liveShape = null;   // shape being resized during drag
+        bool drawing = false;
+
+        // Clamp a drag rectangle to the image bounds and integerize —
+        // used by obfuscate (pixel sampling can't go out of bounds) and
+        // handy for keeping highlights inside the image.
+        (int x, int y, int w, int h) ClampRect(Point a, Point b)
+        {
+            int x1 = (int)Math.Clamp(Math.Min(a.X, b.X), 0, source.PixelWidth);
+            int y1 = (int)Math.Clamp(Math.Min(a.Y, b.Y), 0, source.PixelHeight);
+            int x2 = (int)Math.Clamp(Math.Max(a.X, b.X), 0, source.PixelWidth);
+            int y2 = (int)Math.Clamp(Math.Max(a.Y, b.Y), 0, source.PixelHeight);
+            return (x1, y1, x2 - x1, y2 - y1);
+        }
+
+        // Pixelate a region of the SOURCE image: crop → downscale to
+        // ~12px blocks → display upscaled with nearest-neighbor. The
+        // result is a mosaic that genuinely destroys the detail
+        // underneath (it's baked from the real pixels, so saving
+        // flattens exactly what's previewed). Returns null for regions
+        // too small to matter.
+        UIElement? MakePixelated(Point a, Point b)
+        {
+            var (x, y, w, h) = ClampRect(a, b);
+            if (w < 4 || h < 4) return null;
+            try
+            {
+                var crop = new CroppedBitmap(source, new System.Windows.Int32Rect(x, y, w, h));
+                // Downscale so each mosaic block is ~12px of the original,
+                // with at least 1px in each dimension, then let the Image
+                // upscale it back with NearestNeighbor for hard block edges.
+                const double blockPx = 12.0;
+                int smallW = Math.Max(1, (int)Math.Round(w / blockPx));
+                int smallH = Math.Max(1, (int)Math.Round(h / blockPx));
+                var small = new TransformedBitmap(crop,
+                    new ScaleTransform((double)smallW / w, (double)smallH / h));
+                var img = new Image
+                {
+                    Source = small,
+                    Width = w,
+                    Height = h,
+                    Stretch = Stretch.Fill,
+                };
+                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.NearestNeighbor);
+                Canvas.SetLeft(img, x);
+                Canvas.SetTop(img, y);
+                return img;
+            }
+            catch { return null; }
+        }
+
+        // Build (or rebuild) the shape for the current drag rectangle.
+        // Called on every MouseMove — replacing the live shape wholesale
+        // is simpler than mutating geometry in place, and cheap at
+        // human drag speeds. `final` distinguishes the mouse-up build:
+        // obfuscate shows a cheap dashed preview during the drag and
+        // only computes the actual mosaic once, at the end.
+        // Arrow geometry builder — shared by BuildShape (creation) and
+        // the Select tool (endpoint drags rebuild the SAME Path's Data
+        // in place, so the element identity and undo entry survive).
+        static Geometry BuildArrowGeometry(Point a, Point b)
+        {
+            var geo = new GeometryGroup();
+            geo.Children.Add(new LineGeometry(a, b));
+            var dx = b.X - a.X;
+            var dy = b.Y - a.Y;
+            var len = Math.Sqrt(dx * dx + dy * dy);
+            if (len > 2)
+            {
+                double headLen = Math.Clamp(len * 0.22, 8, 26);
+                double angle = Math.Atan2(dy, dx);
+                const double spread = Math.PI / 7;  // ~26° per side
+                var h1 = new Point(
+                    b.X - headLen * Math.Cos(angle - spread),
+                    b.Y - headLen * Math.Sin(angle - spread));
+                var h2 = new Point(
+                    b.X - headLen * Math.Cos(angle + spread),
+                    b.Y - headLen * Math.Sin(angle + spread));
+                geo.Children.Add(new LineGeometry(b, h1));
+                geo.Children.Add(new LineGeometry(b, h2));
+            }
+            return geo;
+        }
+
+        UIElement? BuildShape(Point a, Point b, bool final)
+        {
+            var stroke = new SolidColorBrush(currentColor);
+            stroke.Freeze();
+            switch (currentTool)
+            {
+                case Tool.Box:
+                {
+                    double bw = Math.Abs(b.X - a.X), bh = Math.Abs(b.Y - a.Y);
+                    // Radius scales with stroke for large boxes but is
+                    // capped to the shape size so small boxes stay
+                    // rectangular instead of collapsing to a circle.
+                    double r = RoundedCornerRadius(bw, bh, 6 + strokeWidth);
+                    var rect = new Rectangle
+                    {
+                        Stroke = stroke,
+                        StrokeThickness = strokeWidth,
+                        RadiusX = r,
+                        RadiusY = r,
+                        Width = bw,
+                        Height = bh,
+                        Tag = new AnnotMeta { Kind = "box", P1 = a, P2 = b },
+                    };
+                    Canvas.SetLeft(rect, Math.Min(a.X, b.X));
+                    Canvas.SetTop(rect, Math.Min(a.Y, b.Y));
+                    return rect;
+                }
+                case Tool.Line:
+                {
+                    return new Line
+                    {
+                        Stroke = stroke,
+                        StrokeThickness = strokeWidth,
+                        X1 = a.X, Y1 = a.Y, X2 = b.X, Y2 = b.Y,
+                        StrokeStartLineCap = PenLineCap.Round,
+                        StrokeEndLineCap = PenLineCap.Round,
+                        Tag = new AnnotMeta { Kind = "line", P1 = a, P2 = b },
+                    };
+                }
+                case Tool.Highlight:
+                {
+                    // Classic highlighter: 40% alpha fill, no stroke, so
+                    // whatever's underneath stays readable. Clamped to
+                    // the image so a sloppy drag doesn't spill color
+                    // into the (transparent) canvas margin.
+                    var (x, y, w, h) = ClampRect(a, b);
+                    var fill = new SolidColorBrush(Color.FromArgb(
+                        0x66, currentColor.R, currentColor.G, currentColor.B));
+                    fill.Freeze();
+                    var rect = new Rectangle
+                    {
+                        Fill = fill,
+                        RadiusX = RoundedCornerRadius(w, h, 5),   // proportional, matches the box tool
+                        RadiusY = RoundedCornerRadius(w, h, 5),
+                        Width = w,
+                        Height = h,
+                        Tag = new AnnotMeta { Kind = "highlight", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
+                    };
+                    Canvas.SetLeft(rect, x);
+                    Canvas.SetTop(rect, y);
+                    return rect;
+                }
+                case Tool.Obfuscate:
+                {
+                    if (final)
+                    {
+                        var img = MakePixelated(a, b);
+                        if (img is FrameworkElement fe)
+                        {
+                            var (x, y, w, h) = ClampRect(a, b);
+                            fe.Tag = new AnnotMeta { Kind = "obfuscate", P1 = new Point(x, y), P2 = new Point(x + w, y + h) };
+                        }
+                        return img;
+                    }
+                    // Drag preview: dark translucent rect with a dashed
+                    // border — communicates "this area will be blocked
+                    // out" without paying for pixelation on every move.
+                    var (px, py, pw, ph) = ClampRect(a, b);
+                    var rect = new Rectangle
+                    {
+                        Fill = new SolidColorBrush(Color.FromArgb(0x50, 0x00, 0x00, 0x00)),
+                        Stroke = Brushes.White,
+                        StrokeThickness = 1,
+                        StrokeDashArray = new DoubleCollection { 4, 3 },
+                        Width = pw,
+                        Height = ph,
+                    };
+                    Canvas.SetLeft(rect, px);
+                    Canvas.SetTop(rect, py);
+                    return rect;
+                }
+                default: // Arrow
+                {
+                    return new Path
+                    {
+                        Stroke = stroke,
+                        StrokeThickness = strokeWidth,
+                        StrokeStartLineCap = PenLineCap.Round,
+                        StrokeEndLineCap = PenLineCap.Round,
+                        Data = BuildArrowGeometry(a, b),
+                        Tag = new AnnotMeta { Kind = "arrow", P1 = a, P2 = b },
+                    };
+                }
+            }
+        }
+
+        // Number tool counter. Undo decrements it (see DoUndo) so a
+        // mis-click doesn't leave a gap in the sequence.
+        int nextNumber = 1;
+
+        // Commit a floating text editor into a permanent label on the
+        // overlay. Shared by Ctrl+Enter, focus-loss, and tool-switch.
+        // The committed label is a Border with the chosen swatch as
+        // border + text color over a dark-tinted OR pale-complementary
+        // background (Aa toggle). It gets explicit Width/Height =
+        // measured content + comfortable padding, and bounds in its
+        // meta — which is what makes it RESIZABLE with the Select
+        // tool's corner handles. The child text stays centered, so
+        // growing the box adds breathing room around the words.
+        // The one text editor currently open (if any), so Save can flush
+        // it and double-click-to-reedit can avoid stacking editors.
+        TextBox? activeTextEditor = null;
+
+        void CommitTextEditor(TextBox editor)
+        {
+            var text = (editor.Text ?? "").TrimEnd('\r', '\n', ' ', '\t');
+            double x = Canvas.GetLeft(editor);
+            double y = Canvas.GetTop(editor);
+            overlay.Children.Remove(editor);
+            if (ReferenceEquals(activeTextEditor, editor)) activeTextEditor = null;
+            if (string.IsNullOrWhiteSpace(text)) return;  // empty = never happened
+            var textFg = editor.Foreground;
+            var label = new Border
+            {
+                Background = editor.Background,
+                BorderBrush = editor.BorderBrush,   // = the chosen swatch color (red = #E8382A)
+                BorderThickness = new Thickness(2.5),   // slightly thicker for a stronger frame
+                CornerRadius = new CornerRadius(5),     // rounder, matching the box tool
+                Child = new TextBlock
+                {
+                    Text = text,
+                    FontSize = editor.FontSize,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = textFg,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    MaxWidth = Math.Max(80, source.PixelWidth - x - 12),
+                },
+            };
+            // Measure the natural content size, then add comfortable
+            // default padding (the old fixed 5,2 padding read as
+            // cramped). Select-tool corner drags can grow or shrink
+            // from here; the centered child just floats in the space.
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double w = label.DesiredSize.Width + 18;
+            double h = label.DesiredSize.Height + 12;
+            label.Width = w;
+            label.Height = h;
+            // Meta carries the text + styling so the label can be
+            // REOPENED for editing (double-click in Select mode) with
+            // everything preserved — not just moved/resized.
+            label.Tag = new AnnotMeta
+            {
+                Kind = "text",
+                P1 = new Point(x, y),
+                P2 = new Point(x + w, y + h),
+                Text = text,
+                FontSizePx = editor.FontSize,
+                Fg = (editor.Foreground as SolidColorBrush)?.Color ?? currentColor,
+                Bg = (editor.Background as SolidColorBrush)?.Color ?? TintedDark(currentColor),
+            };
+            Canvas.SetLeft(label, x);
+            Canvas.SetTop(label, y);
+            overlay.Children.Add(label);
+            undoStack.Add(label);
+            undoBtn.IsEnabled = true;
+        }
+
+        // Flush any open text editor (called on Save so a label being
+        // typed isn't silently dropped).
+        void CommitOpenTextEditor()
+        {
+            if (activeTextEditor is not null && overlay.Children.Contains(activeTextEditor))
+                CommitTextEditor(activeTextEditor);
+        }
+
+        // Reopen an existing text label for editing: remove the label,
+        // drop a fresh editor in its place pre-filled with its text and
+        // styling. Used by double-click in Select mode.
+        void ReopenTextLabel(Border label)
+        {
+            if (label.Tag is not AnnotMeta m || m.Kind != "text") return;
+            double x = Canvas.GetLeft(label);
+            double y = Canvas.GetTop(label);
+            overlay.Children.Remove(label);
+            undoStack.Remove(label);
+            ClearSelection();
+            PlaceTextEditor(new Point(x, y), m.Text, m.FontSizePx, m.Fg, m.Bg);
+        }
+
+        // Mix the chosen color into a dark base for the label
+        // background: dark enough for contrast against any screenshot,
+        // tinted enough to visibly belong to the chosen swatch.
+        static Color TintedDark(Color c) => Color.FromArgb(
+            0xD9,                       // ~85% opaque
+            (byte)(c.R * 0.22 + 0x14),  // 22% of the hue over near-black
+            (byte)(c.G * 0.22 + 0x12),
+            (byte)(c.B * 0.22 + 0x10));
+
+        // Pale complementary field for the "light" text style: invert
+        // the hue, then blend heavily toward white. Clay red → pale
+        // blue, agave green → pale rose, sky blue → pale peach. High
+        // contrast against the colored text without shouting.
+        static Color TintedLight(Color c) => Color.FromArgb(
+            0xF0,                                        // near-opaque
+            (byte)((255 - c.R) * 0.18 + 0xD6),
+            (byte)((255 - c.G) * 0.18 + 0xD6),
+            (byte)((255 - c.B) * 0.18 + 0xD6));
+
+        // Place a live text editor at the click point, styled to match
+        // the final label exactly. Enter adds a NEW LINE (memo-style);
+        // Ctrl+Enter or clicking elsewhere commits; Esc cancels.
+        void PlaceTextEditor(Point at, string? prefillText = null, double? prefillSize = null,
+            Color? prefillFg = null, Color? prefillBg = null)
+        {
+            var fgBrush = new SolidColorBrush(prefillFg ?? currentColor);
+            fgBrush.Freeze();
+            var bgBrush = new SolidColorBrush(prefillBg ??
+                (textStyle == "light" ? TintedLight(currentColor) : TintedDark(currentColor)));
+            bgBrush.Freeze();
+            var editor = new TextBox
+            {
+                FontSize = prefillSize ?? textSize,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = fgBrush,
+                Background = bgBrush,
+                BorderBrush = fgBrush,
+                BorderThickness = new Thickness(2.5),   // match the committed label
+                CaretBrush = fgBrush,
+                MinWidth = 60,
+                AcceptsReturn = true,     // Enter = new line
+                TextAlignment = TextAlignment.Center,
+                Padding = new Thickness(8, 4, 8, 4),
+                Text = prefillText ?? "",
+                ToolTip = "Enter = new line • Ctrl+Enter or click away = done • Esc = cancel",
+            };
+            activeTextEditor = editor;
+            Canvas.SetLeft(editor, at.X);
+            Canvas.SetTop(editor, at.Y);
+            overlay.Children.Add(editor);
+            editor.Loaded += (_, _) => { editor.Focus(); editor.CaretIndex = editor.Text.Length; };
+            editor.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    CommitTextEditor(editor);
+                    ke.Handled = true;
+                }
+                else if (ke.Key == Key.Escape) { overlay.Children.Remove(editor); ke.Handled = true; }
+            };
+            editor.LostFocus += (_, _) =>
+            {
+                // Guard: LostFocus can fire after Ctrl+Enter already
+                // committed and removed the editor — only commit if
+                // still attached.
+                if (overlay.Children.Contains(editor)) CommitTextEditor(editor);
+            };
+        }
+
+        // Drop a numbered badge: filled circle in the current color with
+        // the number in white. Size scales with the S/M/L selector.
+        void PlaceNumberBadge(Point at)
+        {
+            double d = textSize * 1.6;  // badge diameter tracks text size
+            var fill = new SolidColorBrush(currentColor);
+            fill.Freeze();
+            var badge = new Grid
+            {
+                Width = d,
+                Height = d,
+                // Meta marks this as a number badge (DoUndo decrements
+                // the counter when one is popped) and records the anchor
+                // for the Select tool's move.
+                Tag = new AnnotMeta { Kind = "number", P1 = at },
+            };
+            badge.Children.Add(new Ellipse
+            {
+                Fill = fill,
+                Stroke = Brushes.White,
+                StrokeThickness = Math.Max(1.5, d * 0.06),
+            });
+            badge.Children.Add(new TextBlock
+            {
+                Text = nextNumber.ToString(),
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.Bold,
+                FontSize = d * 0.52,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            // Center the badge on the click point — pointing AT things
+            // is the whole use case.
+            Canvas.SetLeft(badge, at.X - d / 2);
+            Canvas.SetTop(badge, at.Y - d / 2);
+            overlay.Children.Add(badge);
+            undoStack.Add(badge);
+            undoBtn.IsEnabled = true;
+            nextNumber++;
+        }
+
+        // ══ Selection subsystem (Select tool) ═════════════════════════
+        // Selected element gets handles on the handleLayer:
+        //   line/arrow          → a handle at each endpoint (drag to
+        //                         re-aim / lengthen / change angle)
+        //   box/highlight/
+        //   obfuscate           → 4 corner handles (drag to resize)
+        //   text/number         → no handles; body-drag moves them
+        // Dragging the element body moves the whole thing. All edits
+        // MUTATE the existing element (never replace it), so the undo
+        // list entries stay valid. Handles live on a separate layer
+        // that's hidden before Save, so they can't bake into output.
+        UIElement? selected = null;
+        FrameworkElement? dragHandle = null;   // which handle is being dragged
+        bool movingBody = false;
+        Point moveGrabPoint = default;         // pointer pos at body-grab time
+
+        AnnotMeta? MetaOf(UIElement? el) => (el as FrameworkElement)?.Tag as AnnotMeta;
+
+        // Re-apply an element's meta to its visual properties. The one
+        // mutation path used by both body-moves and handle-drags.
+        void ApplyMeta(UIElement el)
+        {
+            var m = MetaOf(el);
+            if (m is null) return;
+            switch (m.Kind)
+            {
+                case "line":
+                    if (el is Line ln) { ln.X1 = m.P1.X; ln.Y1 = m.P1.Y; ln.X2 = m.P2.X; ln.Y2 = m.P2.Y; }
+                    break;
+                case "arrow":
+                    if (el is Path p) p.Data = BuildArrowGeometry(m.P1, m.P2);
+                    break;
+                case "box":
+                case "highlight":
+                case "obfuscate":
+                case "text":     // resizable Border; centered child floats
+                case "paste":    // pasted image; Stretch=Fill scales it
+                    if (el is FrameworkElement fe)
+                    {
+                        double x = Math.Min(m.P1.X, m.P2.X), y = Math.Min(m.P1.Y, m.P2.Y);
+                        fe.Width = Math.Max(m.Kind == "text" ? 24 : 4, Math.Abs(m.P2.X - m.P1.X));
+                        fe.Height = Math.Max(m.Kind == "text" ? 18 : 4, Math.Abs(m.P2.Y - m.P1.Y));
+                        Canvas.SetLeft(fe, x);
+                        Canvas.SetTop(fe, y);
+                        // Keep rounded corners proportional as the shape is
+                        // resized — otherwise shrinking a box to small would
+                        // leave a too-big radius and collapse it to a circle.
+                        if (fe is Rectangle rr)
+                        {
+                            double desired = m.Kind == "box" ? 6 + rr.StrokeThickness : 5;
+                            double r = RoundedCornerRadius(fe.Width, fe.Height, desired);
+                            rr.RadiusX = r;
+                            rr.RadiusY = r;
+                        }
+                    }
+                    break;
+                case "number":
+                    if (el is FrameworkElement badge)
+                    {
+                        Canvas.SetLeft(badge, m.P1.X - badge.Width / 2);
+                        Canvas.SetTop(badge, m.P1.Y - badge.Height / 2);
+                    }
+                    break;
+            }
+        }
+
+        FrameworkElement MakeHandle(string role)
+        {
+            var h = new Rectangle
+            {
+                Width = 9,
+                Height = 9,
+                Fill = Brushes.White,
+                Stroke = new SolidColorBrush(Color.FromRgb(0xE5, 0x9A, 0x2A)),
+                StrokeThickness = 1.5,
+                Cursor = Cursors.SizeAll,
+                Tag = role,  // "p1"/"p2" endpoints, or "nw"/"ne"/"sw"/"se" corners
+            };
+            h.MouseLeftButtonDown += (_, e) =>
+            {
+                dragHandle = h;
+                handleLayer.CaptureMouse();
+                e.Handled = true;
+            };
+            return h;
+        }
+
+        void PositionHandle(FrameworkElement h, Point at)
+        {
+            Canvas.SetLeft(h, at.X - h.Width / 2);
+            Canvas.SetTop(h, at.Y - h.Height / 2);
+        }
+
+        void RefreshHandles()
+        {
+            handleLayer.Children.Clear();
+            var m = MetaOf(selected);
+            if (selected is null || m is null) return;
+            switch (m.Kind)
+            {
+                case "line":
+                case "arrow":
+                {
+                    var h1 = MakeHandle("p1"); PositionHandle(h1, m.P1); handleLayer.Children.Add(h1);
+                    var h2 = MakeHandle("p2"); PositionHandle(h2, m.P2); handleLayer.Children.Add(h2);
+                    break;
+                }
+                case "box":
+                case "highlight":
+                case "obfuscate":
+                case "text":
+                case "paste":
+                {
+                    double x1 = Math.Min(m.P1.X, m.P2.X), y1 = Math.Min(m.P1.Y, m.P2.Y);
+                    double x2 = Math.Max(m.P1.X, m.P2.X), y2 = Math.Max(m.P1.Y, m.P2.Y);
+                    // Normalize meta so corner roles are stable while dragging.
+                    m.P1 = new Point(x1, y1);
+                    m.P2 = new Point(x2, y2);
+                    var nw = MakeHandle("nw"); PositionHandle(nw, new Point(x1, y1)); handleLayer.Children.Add(nw);
+                    var ne = MakeHandle("ne"); PositionHandle(ne, new Point(x2, y1)); handleLayer.Children.Add(ne);
+                    var sw = MakeHandle("sw"); PositionHandle(sw, new Point(x1, y2)); handleLayer.Children.Add(sw);
+                    var se = MakeHandle("se"); PositionHandle(se, new Point(x2, y2)); handleLayer.Children.Add(se);
+                    break;
+                }
+                // number: move-only via body drag, no handles.
+            }
+        }
+
+        void ClearSelection()
+        {
+            selected = null;
+            dragHandle = null;
+            movingBody = false;
+            handleLayer.Children.Clear();
+        }
+
+        // Walk from the event's original source up to the direct child
+        // of the overlay (number badges are Grids containing an Ellipse
+        // + TextBlock, so the source is usually a grandchild).
+        UIElement? HitAnnotation(object originalSource)
+        {
+            var cur = originalSource as DependencyObject;
+            while (cur is not null)
+            {
+                if (cur is UIElement el && overlay.Children.Contains(el))
+                    return ReferenceEquals(el, overlay) ? null : el;
+                cur = System.Windows.Media.VisualTreeHelper.GetParent(cur);
+            }
+            return null;
+        }
+
+        // Handle drags land on the handleLayer (it has mouse capture).
+        handleLayer.MouseMove += (_, e) =>
+        {
+            if (dragHandle is null || selected is null) return;
+            var m = MetaOf(selected);
+            if (m is null) return;
+            var pos = e.GetPosition(overlay);
+            switch (dragHandle.Tag as string)
+            {
+                case "p1": m.P1 = pos; break;
+                case "p2": m.P2 = pos; break;
+                case "nw": m.P1 = pos; break;
+                case "se": m.P2 = pos; break;
+                case "ne": m.P1 = new Point(m.P1.X, pos.Y); m.P2 = new Point(pos.X, m.P2.Y); break;
+                case "sw": m.P1 = new Point(pos.X, m.P1.Y); m.P2 = new Point(m.P2.X, pos.Y); break;
+            }
+            ApplyMeta(selected);
+            RefreshHandles();
+        };
+        handleLayer.MouseLeftButtonUp += (_, _) =>
+        {
+            if (dragHandle is not null)
+            {
+                dragHandle = null;
+                handleLayer.ReleaseMouseCapture();
+            }
+        };
+
+        // ── Paste image (Ctrl+V or the 📋 toolbar button) ─────────────
+        // Drops the clipboard image onto the canvas as a movable,
+        // resizable object — perfect for composing job aids or IT
+        // tickets from several screenshots. Oversized pastes scale to
+        // fit; select-tool corner drags resize from there. Flattens
+        // into the output like everything else.
+        void PasteImageFromClipboard()
+        {
+            try
+            {
+                if (!Clipboard.ContainsImage()) return;
+                var img = Clipboard.GetImage();
+                if (img is not null) PlacePastedImage(img);
+            }
+            catch (Exception ex)
+            {
+                Services.Trace.Log("annotate", $"paste failed: {ex.Message}");
+            }
+        }
+
+        // Drop a bitmap onto the canvas as a movable, resizable object.
+        // Shared by clipboard paste and the "grab region" button.
+        void PlacePastedImage(BitmapSource img)
+        {
+            double w = img.PixelWidth, h = img.PixelHeight;
+            // Fit within 70% of the canvas so a full-screen paste
+            // doesn't bury the base image.
+            double maxW = source.PixelWidth * 0.7, maxH = source.PixelHeight * 0.7;
+            double scale = Math.Min(1.0, Math.Min(maxW / w, maxH / h));
+            w = Math.Max(16, w * scale);
+            h = Math.Max(16, h * scale);
+            double x = Math.Max(0, (source.PixelWidth - w) / 2);
+            double y = Math.Max(0, (source.PixelHeight - h) / 2);
+            var el = new Image
+            {
+                Source = img,
+                Width = w,
+                Height = h,
+                Stretch = Stretch.Fill,
+                Tag = new AnnotMeta { Kind = "paste", P1 = new Point(x, y), P2 = new Point(x + w, y + h) },
+            };
+            Canvas.SetLeft(el, x);
+            Canvas.SetTop(el, y);
+            overlay.Children.Add(el);
+            undoStack.Add(el);
+            undoBtn.IsEnabled = true;
+            // Auto-select it so the user can immediately move or
+            // resize the fresh paste — switch to Select mode.
+            currentTool = Tool.Select;
+            foreach (var kv in toolButtons) kv.Value.IsChecked = kv.Key == Tool.Select;
+            overlay.Cursor = Cursors.Arrow;
+            selected = el;
+            RefreshHandles();
+        }
+
+        // Grab a new screen region and drop it onto the canvas. The
+        // annotator alone isn't enough — its owner chain (the "Screenshot
+        // captured" chooser, and ClipNinja's main window) is still on
+        // screen and would be frozen into the capture, blocking whatever
+        // is behind them. So hide EVERY visible window in the chain, wait
+        // for them to actually leave the screen (same trick the main
+        // capture flow uses), snapshot, then restore them all.
+        void GrabRegionIntoCanvas()
+        {
+            // The annotator itself is a MODAL dialog (ShowDialog). Calling
+            // Hide()/Show() on a modal dialog destroys its dialog state,
+            // which then makes setting DialogResult throw
+            // ("DialogResult can be set only after Window is created and
+            // shown as dialog"). So toggle the annotator's VISIBILITY
+            // instead (which keeps the dialog alive), and only use
+            // Hide()/Show() on the non-modal OWNER windows above it.
+            var hiddenOwners = new List<Window>();
+            Window? w = dlg.Owner;
+            while (w is not null)
+            {
+                if (w.IsVisible) hiddenOwners.Add(w);
+                w = w.Owner;
+            }
+            dlg.Visibility = Visibility.Hidden;
+            foreach (var win in hiddenOwners) win.Hide();
+
+            // Force a render pass + a short sleep so the windows are truly
+            // gone before the selector freezes the desktop.
+            dlg.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            System.Threading.Thread.Sleep(120);
+
+            BitmapSource? shot = null;
+            try { shot = Views.RegionSelectorWindow.SelectAndCapture(); }
+            catch (Exception ex) { Services.Trace.Log("annotate", $"grab region failed: {ex.Message}"); }
+
+            // Restore owners first, then the annotator on top, and give it
+            // focus. Visibility (not Show) keeps the dialog state intact.
+            foreach (var win in hiddenOwners) win.Show();
+            dlg.Visibility = Visibility.Visible;
+            dlg.Activate();
+
+            if (shot is not null) PlacePastedImage(shot);
+        }
+
+        pasteBtn.Click += (_, _) => PasteImageFromClipboard();
+        grabBtn.Click += (_, _) => GrabRegionIntoCanvas();
+
+        overlay.MouseLeftButtonDown += (_, e) =>
+        {
+            // Select mode: hit-test annotations; click body to select +
+            // start moving, click empty space to deselect. DOUBLE-click a
+            // text label to reopen it for editing.
+            if (currentTool == Tool.Select)
+            {
+                var hit = HitAnnotation(e.OriginalSource);
+                if (e.ClickCount == 2 && hit is Border b && MetaOf(b)?.Kind == "text")
+                {
+                    ReopenTextLabel(b);
+                    e.Handled = true;
+                    return;
+                }
+                if (hit is not null && MetaOf(hit) is not null)
+                {
+                    selected = hit;
+                    RefreshHandles();
+                    movingBody = true;
+                    moveGrabPoint = e.GetPosition(overlay);
+                    overlay.CaptureMouse();
+                }
+                else
+                {
+                    ClearSelection();
+                }
+                e.Handled = true;
+                return;
+            }
+            // Click-to-place tools handle everything on the down-click;
+            // no drag state.
+            if (currentTool == Tool.Text)
+            {
+                PlaceTextEditor(e.GetPosition(overlay));
+                e.Handled = true;
+                return;
+            }
+            if (currentTool == Tool.Number)
+            {
+                PlaceNumberBadge(e.GetPosition(overlay));
+                e.Handled = true;
+                return;
+            }
+            dragStart = e.GetPosition(overlay);
+            drawing = true;
+            overlay.CaptureMouse();
+        };
+        overlay.MouseMove += (_, e) =>
+        {
+            // Body-move in select mode: shift the selected element by
+            // the pointer delta via its meta, then re-apply.
+            if (movingBody && selected is not null && MetaOf(selected) is { } mm)
+            {
+                var pos = e.GetPosition(overlay);
+                var dx = pos.X - moveGrabPoint.X;
+                var dy = pos.Y - moveGrabPoint.Y;
+                moveGrabPoint = pos;
+                mm.P1 = new Point(mm.P1.X + dx, mm.P1.Y + dy);
+                mm.P2 = new Point(mm.P2.X + dx, mm.P2.Y + dy);
+                ApplyMeta(selected);
+                RefreshHandles();
+                return;
+            }
+            if (!drawing) return;
+            var current = e.GetPosition(overlay);
+            if (liveShape is not null) overlay.Children.Remove(liveShape);
+            liveShape = BuildShape(dragStart, current, final: false);
+            if (liveShape is not null) overlay.Children.Add(liveShape);
+        };
+        overlay.MouseLeftButtonUp += (_, e) =>
+        {
+            if (movingBody)
+            {
+                movingBody = false;
+                overlay.ReleaseMouseCapture();
+                return;
+            }
+            if (!drawing) return;
+            drawing = false;
+            overlay.ReleaseMouseCapture();
+            var end = e.GetPosition(overlay);
+            if (liveShape is not null) overlay.Children.Remove(liveShape);
+            liveShape = null;
+            // Ignore degenerate clicks (no meaningful drag distance) —
+            // otherwise a stray click leaves an invisible 0-size shape
+            // on the undo stack, which feels like undo "not working".
+            if (Math.Abs(end.X - dragStart.X) < 3 && Math.Abs(end.Y - dragStart.Y) < 3) return;
+            var final = BuildShape(dragStart, end, final: true);
+            if (final is null) return;  // e.g. obfuscate region fully out of bounds
+            overlay.Children.Add(final);
+            undoStack.Add(final);
+            undoBtn.IsEnabled = true;
+        };
+
+        void DoUndo()
+        {
+            if (undoStack.Count == 0) return;
+            var popped = undoStack[^1];
+            undoStack.RemoveAt(undoStack.Count - 1);
+            overlay.Children.Remove(popped);
+            // Popping a number badge rewinds the counter so the next
+            // click reuses that number — no gaps in the sequence.
+            if (popped is FrameworkElement fe && fe.Tag is AnnotMeta { Kind: "number" })
+                nextNumber = Math.Max(1, nextNumber - 1);
+            ClearSelection();  // handles may point at the removed element
+            undoBtn.IsEnabled = undoStack.Count > 0;
+        }
+        undoBtn.Click += (_, _) => DoUndo();
+
+        // Tool-switch housekeeping: leaving Select clears the selection;
+        // the cursor communicates the mode (arrow = select, cross =
+        // draw). Attached AFTER the primary click handler in
+        // MakeToolButton, so currentTool is already updated when this
+        // runs. Declared here (after the selection subsystem) so all
+        // captured locals exist.
+        foreach (var kv in toolButtons)
+        {
+            kv.Value.Click += (_, _) =>
+            {
+                ClearSelection();
+                overlay.Cursor = currentTool == Tool.Select ? Cursors.Arrow : Cursors.Cross;
+            };
+        }
+
+        dlg.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control) { DoUndo(); e.Handled = true; }
+            else if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                // Don't hijack paste while typing in a text editor box.
+                if (Keyboard.FocusedElement is not TextBox) { PasteImageFromClipboard(); e.Handled = true; }
+            }
+            else if (e.Key == Key.Delete && selected is not null)
+            {
+                // Delete the selected annotation. Removing from the
+                // middle of the undo list is exactly why it's a List —
+                // remaining undo order is preserved. Number badges
+                // don't renumber on middle-delete (a gap is more honest
+                // than silently reshuffling the remaining steps).
+                overlay.Children.Remove(selected);
+                undoStack.Remove(selected);
+                ClearSelection();
+                undoBtn.IsEnabled = undoStack.Count > 0;
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                // Esc peels back one layer at a time: selection first,
+                // dialog second.
+                if (selected is not null) { ClearSelection(); e.Handled = true; }
+                else dlg.DialogResult = false;
+            }
+        };
+
+        // ── Buttons ───────────────────────────────────────────────────
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(10, 8, 10, 10),
+        };
+        var cancelBtn = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(14, 5, 14, 5),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsCancel = true,
+            Cursor = Cursors.Hand,
+        };
+
+        // "Full action" mode: when the caller passes the post-capture
+        // callbacks, the annotator OWNS the whole action set (Save as /
+        // Quick save / Send) — the capture chooser has closed. Otherwise
+        // (editing an existing tray slot) it's just Save annotations.
+        bool fullActions = onSendToTray is not null;
+
+        Button? saveAsBtn = null, quickSaveBtn = null;
+        if (fullActions && onSaveAs is not null)
+        {
+            saveAsBtn = new Button
+            {
+                Content = "💾 Save as…",
+                Padding = new Thickness(12, 5, 12, 5),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Save the annotated image to a file you choose",
+            };
+        }
+        if (fullActions && onQuickSave is not null)
+        {
+            quickSaveBtn = new Button
+            {
+                Content = "💾 Quick save",
+                Padding = new Thickness(12, 5, 12, 5),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Save the annotated image straight to your quick-save folder",
+            };
+        }
+        var saveBtn = new Button
+        {
+            Content = fullActions ? "📋 Send to ClipNinja" : "Save annotations",
+            Padding = new Thickness(14, 5, 14, 5),
+            FontWeight = FontWeights.Bold,
+            Cursor = Cursors.Hand,
+        };
+        // Shared: persist prefs, clear handles, flatten. Returns the
+        // flattened image or null if nothing was drawn.
+        BitmapSource? PrepareResult()
+        {
+            if (settings is not null)
+            {
+                settings.AnnotatorDefaultColor = HexOf(currentColor);
+                settings.AnnotatorDefaultSize = currentSizeLabel;
+                settings.AnnotatorTextStyle = textStyle;
+                persistSettings?.Invoke();
+            }
+            // Commit any text editor still open (clicking Save with the
+            // caret in a label shouldn't silently drop that label).
+            CommitOpenTextEditor();
+            // Clear selection FIRST — handles live on a layer inside the
+            // rendered surface, and baked-in selection handles would be
+            // a terrible souvenir.
+            ClearSelection();
+            // Nothing drawn AND no resize requested → return null so the
+            // caller treats it as "unchanged" (no needless re-encode). But
+            // if the user chose a non-1.0 scale, we DO need to produce a
+            // resized image even with zero annotations.
+            bool scaled = Math.Abs(outputScale - 1.0) > 0.001;
+            if (undoStack.Count == 0 && !scaled) return null;
+            var flat = Flatten(source, surface, outputScale);
+            if (flat is null) return null;
+            // Bake in the presentation effects (torn → border → shadow) so
+            // the sent/saved image carries them. Same pipeline the capture
+            // watcher uses, so results are identical.
+            if (fxTorn || fxBorder || fxShadow)
+                flat = Services.ClipboardWatcher.ApplyEffects(flat, tornAll: fxTorn, border: fxBorder, shadow: fxShadow);
+            return flat;
+        }
+
+        saveBtn.Click += (_, _) =>
+        {
+            var flat = PrepareResult();
+            if (fullActions)
+            {
+                // Send the finished image (falls back to the plain capture
+                // if nothing was drawn — "Send" on an untouched shot still
+                // means "take it").
+                onSendToTray!(flat ?? source);
+                sentToTray = true;
+                dlg.DialogResult = true;
+                return;
+            }
+            // Classic mode (editing a tray slot): return to the caller.
+            if (flat is null) { dlg.DialogResult = false; return; }
+            result = flat;
+            dlg.DialogResult = true;
+        };
+        if (saveAsBtn is not null)
+        {
+            saveAsBtn.Click += (_, _) =>
+            {
+                var flat = PrepareResult();
+                onSaveAs!(flat ?? source);
+                sentToTray = true;   // treat as handled → close
+                dlg.DialogResult = true;
+            };
+        }
+        if (quickSaveBtn is not null)
+        {
+            quickSaveBtn.Click += (_, _) =>
+            {
+                var flat = PrepareResult();
+                onQuickSave!(flat ?? source);
+                sentToTray = true;
+                dlg.DialogResult = true;
+            };
+        }
+        btnRow.Children.Add(cancelBtn);
+        if (saveAsBtn is not null) btnRow.Children.Add(saveAsBtn);
+        if (quickSaveBtn is not null) btnRow.Children.Add(quickSaveBtn);
+        btnRow.Children.Add(saveBtn);
+        Grid.SetRow(btnRow, 2);
+        root.Children.Add(btnRow);
+
+        dlg.Content = root;
+        var ok = dlg.ShowDialog();
+        return ok == true ? result : null;
+    }
+
+    /// <summary>
+    /// Render the image + annotation overlay into a flat bitmap at the
+    /// source's native pixel size. The surface Grid is already sized
+    /// 1:1 with the bitmap, so RenderTargetBitmap at 96 DPI captures
+    /// pixel-perfect output (all ClipNinja bitmaps are 96-DPI
+    /// normalized by the capture pipeline).
+    /// </summary>
+    /// <summary>Corner radius for a rounded box/highlight that stays
+    /// proportional to the shape's size. A fixed radius turns a SMALL
+    /// box into a circle/stadium (the radius eats the whole side); this
+    /// caps the radius at a fraction of the shorter side so there's
+    /// always a visible straight edge, while large boxes still get the
+    /// full "nice" radius. Also floored at 0 for degenerate sizes.</summary>
+    /// <summary>A ragged rectangular clip geometry for the torn-edge
+    /// PREVIEW — a deterministic jagged outline matching the look the
+    /// baked ApplyTornEdges produces (all four sides). Not pixel-identical
+    /// to the bake, but a faithful preview of "torn all around".</summary>
+    private static Geometry BuildTornClip(int w, int h)
+    {
+        // Match the shallow bake depth (a small nibble, not a deep bite).
+        int depth = Math.Clamp(Math.Min(w, h) / 90, 3, 8);
+        int depthH = depth;
+        int depthV = depth;
+        var rng = new Random(w * 73856093 ^ h * 19349663);
+        var pts = new List<Point>();
+        // Walk the perimeter, jittering inward by a random depth every
+        // ~12px so the outline looks torn. Clockwise from top-left.
+        void EdgeH(int x0, int x1, int y, int depth, int dir)
+        {
+            for (int x = x0; dir > 0 ? x <= x1 : x >= x1; x += dir * 12)
+                pts.Add(new Point(x, y + dir * 0 + (rng.Next(depth + 1)) * (y == 0 ? 1 : -1)));
+        }
+        void EdgeV(int y0, int y1, int x, int depth, int dir)
+        {
+            for (int y = y0; dir > 0 ? y <= y1 : y >= y1; y += dir * 12)
+                pts.Add(new Point(x + (rng.Next(depth + 1)) * (x == 0 ? 1 : -1), y));
+        }
+        EdgeH(0, w, 0, depthH, +1);       // top L→R
+        EdgeV(0, h, w, depthV, +1);       // right T→B
+        EdgeH(w, 0, h, depthH, -1);       // bottom R→L
+        EdgeV(h, 0, 0, depthV, -1);       // left B→T
+        if (pts.Count < 3) return new RectangleGeometry(new Rect(0, 0, w, h));
+        var fig = new PathFigure { StartPoint = pts[0], IsClosed = true, IsFilled = true };
+        for (int i = 1; i < pts.Count; i++) fig.Segments.Add(new LineSegment(pts[i], false));
+        var geo = new PathGeometry();
+        geo.Figures.Add(fig);
+        geo.Freeze();
+        return geo;
+    }
+
+    private static double RoundedCornerRadius(double width, double height, double desired)
+    {
+        double shorter = Math.Min(Math.Abs(width), Math.Abs(height));
+        // 22% of the shorter side leaves ~56% of each side straight, so
+        // it clearly reads as a rounded rectangle, never a circle.
+        double cap = shorter * 0.22;
+        return Math.Max(0, Math.Min(desired, cap));
+    }
+
+    private static BitmapSource? Flatten(BitmapSource source, Grid surface, double scale = 1.0)
+    {
+        // The surface may carry a LayoutTransform (the on-screen view
+        // scale from the Size dropdown). Reset it to Identity so we
+        // render the base 1:1 surface and apply the scale ONCE via DPI
+        // below — otherwise the output would be double-scaled. Restored
+        // after (harmless even though the dialog is closing).
+        var savedTransform = surface.LayoutTransform;
+        try
+        {
+            surface.LayoutTransform = Transform.Identity;
+            surface.Measure(new Size(source.PixelWidth, source.PixelHeight));
+            surface.Arrange(new Rect(0, 0, source.PixelWidth, source.PixelHeight));
+            surface.UpdateLayout();
+
+            // Output dimensions scale by the chosen factor. Rendering the
+            // vector surface at a higher DPI (rather than upscaling a
+            // finished bitmap) keeps annotation strokes and text crisp;
+            // for downscaling, WPF's renderer resamples the image
+            // smoothly. Guard against zero/negative.
+            double s = scale <= 0 ? 1.0 : scale;
+            int outW = Math.Max(1, (int)Math.Round(source.PixelWidth * s));
+            int outH = Math.Max(1, (int)Math.Round(source.PixelHeight * s));
+
+            // 96 DPI × scale makes RenderTargetBitmap emit outW×outH
+            // device pixels from the same DIU-sized surface.
+            var rtb = new RenderTargetBitmap(
+                outW, outH,
+                96 * s, 96 * s, PixelFormats.Pbgra32);
+            rtb.Render(surface);
+            rtb.Freeze();
+            return rtb;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            surface.LayoutTransform = savedTransform;
+        }
+    }
+}

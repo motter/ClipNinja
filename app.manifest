@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"
+          xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+
+  <!--
+    DPI awareness. Without this, Windows runs ClipNinja as a DPI-UNAWARE
+    process and virtualizes its coordinates: GetSystemMetrics returns
+    SCALED (logical) sizes while BitBlt copies from the REAL framebuffer,
+    so a drag-selected region maps to the wrong (zoomed/offset) part of
+    the screen. Changing screen resolution / scale exposes the mismatch.
+
+    Declaring Per-Monitor-V2 makes every API — GetSystemMetrics, BitBlt,
+    and WPF — report TRUE physical pixels in one consistent coordinate
+    space, so the selection rectangle lines up exactly with the capture.
+  -->
+  <asmv3:application>
+    <asmv3:windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
+    </asmv3:windowsSettings>
+  </asmv3:application>
+
+  <!-- Declare Windows 10/11 compatibility so per-monitor-v2 is honored. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" /> <!-- Windows 10/11 -->
+    </application>
+  </compatibility>
+
+</assembly>
